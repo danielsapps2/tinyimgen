@@ -7,6 +7,7 @@ import os
 import sys
 
 os.environ.setdefault("NUMPY_MADVISE_HUGEPAGE", "0")
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")   # Apple silicon: run ops MPS lacks on the CPU
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
@@ -25,7 +26,7 @@ if __name__ == "__main__":
     ap.add_argument("-o", default=None)
     a = ap.parse_args()
     import cv2
-    import torch
+    from tinyimgen.device import empty_cache
     import tripo
     from tinyimgen.gpulock import gpu_lock
     keep = {}
@@ -44,7 +45,7 @@ if __name__ == "__main__":
             with gpu_lock():
                 img = tripo.render(Vp, F, UV, tex, np.array([0, 0.5 * H, 0]), 0.55 * H, az, size=360, W=260,
                                    bg=0.86).copy()
-                torch.cuda.empty_cache()
+                empty_cache()
             img[int(360 / 2 + 360 / (1.1 * H) * 0.5 * H) - 1:, :] = (img[int(360 / 2 + 360 / (1.1 * H) * 0.5 * H) - 1:, :]
                                                                       * 0.8).astype(np.uint8)   # floor band
             tiles.append(img)

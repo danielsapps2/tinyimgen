@@ -8,9 +8,12 @@ Writes OUTDIR/views/*.png (background removed), OUTDIR/shape_<model>.glb and OUT
 import argparse
 import json
 import os
+import sys
 import time
 
-import torch
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tinyimgen import device  # noqa: E402  (before torch: MPS fallback switch)
+import torch  # noqa: E402
 from PIL import Image
 
 MODELS = {
@@ -42,8 +45,8 @@ def swap_components(pipe):
             for n in names:
                 if n != name:
                     getattr(pipe, n).to("cpu")
-            torch.cuda.empty_cache()
-            getattr(pipe, name).to("cuda")
+            device.empty_cache()
+            getattr(pipe, name).to(device.DEVICE)
             state["active"] = name
 
     def wrap(obj, attr, name):
@@ -73,9 +76,14 @@ def _pipeline(name):
         pipe = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(repo, subfolder=sub, use_safetensors=True,
                                                                 device="cpu", dtype=torch.float16)
         # ~4 GB of fp16 weights (DINOv2-giant encoder 2.3 GB): keep only the active component on the GPU.
-        pipe.device = torch.device("cuda")
+        # Unified memory (Apple silicon) has room for all of it, so there it simply stays on the device.
+        pipe.device = torch.device(device.DEVICE)
         pipe.enable_flashvdm(topk_mode="merge")
-        swap_components(pipe)
+        if device.CUDA:
+            swap_components(pipe)
+        else:
+            for n in ("conditioner", "model", "vae"):
+                getattr(pipe, n).to(device.DEVICE)
         _pipes[name] = pipe
     return _pipes[name]
 
@@ -85,23 +93,24 @@ def generate_shape(views, name=None, steps=5, octree=380, seed=1234):
     name = name or ("mv" if len(views) > 1 else "mini")
     repo, sub = MODELS[name]
     pipe = _pipeline(name)
-    torch.cuda.synchronize(); torch.cuda.reset_peak_memory_stats(); t = time.time()
+    device.synchronize(); device.reset_peak(); t = time.time()
     mesh = pipe(image=views if name == "mv" else views["front"], num_inference_steps=steps,
                 octree_resolution=octree, num_chunks=20000, generator=torch.manual_seed(seed),
                 output_type="trimesh")[0]
-    torch.cuda.synchronize()
+    device.synchronize()
     stats = {"model": f"{repo}/{sub}", "seconds": round(time.time() - t, 1),
-             "peak_vram_gb": round(torch.cuda.max_memory_allocated() / 1e9, 2),
+             "peak_vram_gb": device.peak_gb(),
              "vertices": len(mesh.vertices), "faces": len(mesh.faces),
              "views": list(views) if name == "mv" else ["front"]}
     # park every component in RAM between uses: the image server needs the VRAM back
-    for n in ("conditioner", "model", "vae"):
-        getattr(pipe, n).to("cpu")
-    pipe._swap_state["active"] = None
+    if device.CUDA:
+        for n in ("conditioner", "model", "vae"):
+            getattr(pipe, n).to("cpu")
+        pipe._swap_state["active"] = None
     del pipe
     import gc
     gc.collect()
-    torch.cuda.empty_cache()
+    device.empty_cache()
     return mesh, stats
 
 

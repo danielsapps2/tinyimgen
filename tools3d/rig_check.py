@@ -10,6 +10,7 @@ import os
 import sys
 
 os.environ.setdefault("NUMPY_MADVISE_HUGEPAGE", "0")
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")   # Apple silicon: run ops MPS lacks on the CPU
 
 import numpy as np  # noqa: E402
 
@@ -63,7 +64,7 @@ def slide(keep):
 
 def sheet(path, keep, cols=8):
     import cv2
-    import torch
+    from tinyimgen.device import empty_cache
     import tripo
     from tinyimgen.gpulock import gpu_lock
     mesh = keep["mesh"]
@@ -78,7 +79,7 @@ def sheet(path, keep, cols=8):
             Vp = skin(V, keep["idx"], keep["w"], keep["J"], poses[int(round(i * (len(poses) - 1) / cols))])
             with gpu_lock():
                 img = tripo.render(Vp, F, UV, tex, np.array([0, 0.5 * H, 0]), 0.56 * H, az, size=256, bg=0.86)
-                torch.cuda.empty_cache()
+                empty_cache()
             tiles.append(img)
         row = np.concatenate(tiles, 1)
         cv2.putText(row, clip["name"], (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)

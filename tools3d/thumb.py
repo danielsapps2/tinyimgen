@@ -9,6 +9,7 @@ import os
 import sys
 
 os.environ.setdefault("NUMPY_MADVISE_HUGEPAGE", "0")
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")   # Apple silicon: run ops MPS lacks on the CPU
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
@@ -17,7 +18,7 @@ import numpy as np  # noqa: E402
 
 
 def main(d):
-    import torch
+    from tinyimgen.device import empty_cache
     from PIL import Image
     import rig
     import tripo
@@ -32,7 +33,7 @@ def main(d):
     half = 0.55 * max(np.ptp(V[:, 1]), np.linalg.norm([np.ptp(V[:, 0]), np.ptp(V[:, 2])]) * 768 / 512)
     with gpu_lock():
         img = tripo.render(V, F, UV, tex, c, half, 30, size=768, W=512, el=12, bg=0.86)
-        torch.cuda.empty_cache()
+        empty_cache()
     Image.fromarray(img).save(os.path.join(d, "thumb.png"))
     with open(os.path.join(d, "job.json")) as f:     # re-read: the user may have renamed it meanwhile
         job = json.load(f)

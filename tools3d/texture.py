@@ -10,7 +10,11 @@ import argparse
 import json
 import math
 import os
+import sys
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tinyimgen.device import DEVICE as dev, empty_cache  # noqa: E402,F401  (before torch: MPS fallback switch)
 
 import cv2
 import numpy as np
@@ -22,7 +26,6 @@ from PIL import Image
 from scipy import ndimage
 from scipy.spatial import cKDTree
 
-dev = "cuda"
 UP = np.array([0, 1, 0], np.float32)
 YUNET = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "third_party", "models",
                      "face_detection_yunet_2023mar.onnx")

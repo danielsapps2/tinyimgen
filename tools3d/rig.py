@@ -23,6 +23,7 @@ import struct
 import sys
 
 os.environ.setdefault("NUMPY_MADVISE_HUGEPAGE", "0")   # see make3d.py: pinned server RAM stalls numpy's huge pages
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")   # Apple silicon: run ops MPS lacks on the CPU
 
 import numpy as np  # noqa: E402
 
@@ -279,8 +280,8 @@ def fit_skeleton(mesh, debug_dir=None):
     from tinyimgen.gpulock import gpu_lock
     with gpu_lock():
         img, m = front_render(V, F, UV, tex)
-        import torch
-        torch.cuda.empty_cache()
+        from tinyimgen.device import empty_cache
+        empty_cache()
     L = detect_pose(img)
     if debug_dir:
         from PIL import Image
@@ -467,8 +468,8 @@ def fit_fingers(mesh, J, tips, debug_dir=None):
             size, half = 512, 0.75 * L
             with gpu_lock():
                 img = tripo.render(V, F, UV, tex, c, half, az, size=size, el=el, bg=0.86)
-                import torch
-                torch.cuda.empty_cache()
+                from tinyimgen.device import empty_cache
+                empty_cache()
             if debug_dir:
                 from PIL import Image
                 Image.fromarray(img).save(os.path.join(debug_dir, f"rig_hand_{side.lower()}.png"))
@@ -970,8 +971,10 @@ def write_glb(path, mesh, J, joints, weights, clips, extras=None, tips=None):
 
 
 def blender():
-    """A Blender with a working glTF importer (the distro build lacks numpy): TINYIMGEN_BLENDER, else ~/Tools."""
-    for b in (os.environ.get("TINYIMGEN_BLENDER"), os.path.expanduser("~/Tools/blender-build/bin/blender")):
+    """A Blender with a working glTF importer (the distro build lacks numpy): TINYIMGEN_BLENDER, else ~/Tools, else the
+    macOS app (its bundled Python has numpy)."""
+    for b in (os.environ.get("TINYIMGEN_BLENDER"), os.path.expanduser("~/Tools/blender-build/bin/blender"),
+              "/Applications/Blender.app/Contents/MacOS/Blender"):
         if b and os.path.exists(b):
             return b
     return None

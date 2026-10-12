@@ -181,7 +181,7 @@ def transfer(Vs, Fs, UVs, tex_s, Vt, Ft, UVt, size, gpu):
     import cv2
     import torch
     from scipy.spatial import cKDTree
-    from texture import dev, rasterize
+    from texture import dev, empty_cache, rasterize
     with gpu(), torch.no_grad():
         uvp = torch.tensor(np.c_[UVt[:, 0] * size, (1 - UVt[:, 1]) * size], device=dev, dtype=torch.float32)
         Ftt = torch.tensor(Ft.astype(np.int64), device=dev)
@@ -189,7 +189,7 @@ def transfer(Vs, Fs, UVs, tex_s, Vt, Ft, UVt, size, gpu):
         P = (bary[..., None] * torch.tensor(Vt, device=dev, dtype=torch.float32)[Ftt[fid[ty, tx]]]).sum(1).cpu().numpy()
         ty, tx = ty.cpu().numpy(), tx.cpu().numpy()
         del uvp, Ftt, fid, bary
-        torch.cuda.empty_cache()
+        empty_cache()
     tri = Vs[Fs]
     _, k = cKDTree(tri.mean(1)).query(P, k=4, workers=-1)
     # the nearest of the 4 nearest-centroid triangles, by distance to the clamped projection

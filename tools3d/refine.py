@@ -13,11 +13,12 @@ import time
 import urllib.error
 import urllib.request
 
+from texture import dev  # noqa: F401  (first: picks the device and sets the MPS fallback switch before torch loads)
 import numpy as np
 import torch
 from PIL import Image
 
-from texture import Model, align_to_render, camera, load_rgba, repaint_check
+from texture import Model, align_to_render, camera, empty_cache, load_rgba, repaint_check
 
 ANGLES = {"front_left": 45, "left": 90, "back_left": 135, "back": 180, "back_right": 225, "right": 270,
           "front_right": 315}
@@ -89,7 +90,7 @@ def main():
                   f"same pose, silhouette, size and position as image 1. The character's design, colours and "
                   f"materials must match image 2: {a.describe}. Plain light grey background.")
         t = time.time()
-        torch.cuda.empty_cache()  # hand our rasterizer scratch back before the server needs the GPU
+        empty_cache()  # hand our rasterizer scratch back before the server needs the GPU
         meta = klein(a.server, prompt, [os.path.relpath(rpath, "out"), front_ref], W, H, a.seed)
         gen = Image.open(os.path.join("out", "gallery", meta["file"])).convert("RGB")
         rgba = np.asarray(remove(gen, session=cut)).astype(np.float32) / 255

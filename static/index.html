@@ -235,7 +235,7 @@ async function run() {
       const src = "/media/gallery/" + meta.file, cap = `${NAMES[m]} · ${meta.seconds}s · seed ${meta.seed} · ${prompt}`;
       slots[i].innerHTML = meta.cost_usd != null
         ? `<div class="slot"><img alt=""></div><div class="meta"><span class="tag fal">${NAMES[m]}</span><span><b>${meta.seconds}s</b> on fal</span><span>${meta.width}×${meta.height}</span><span><b>${money(meta.cost_usd)}</b> est.</span><span>seed ${meta.seed}</span></div>`
-        : `<div class="slot"><img alt=""></div><div class="meta"><span class="tag ${m}">${NAMES[m]}</span><span><b>${meta.seconds}s</b> server time</span><span>${meta.width}×${meta.height}</span><span>${meta.steps} steps</span><span>seed ${meta.seed}</span><span>${meta.peak_vram_gb} GB peak</span></div>`;
+        : `<div class="slot"><img alt=""></div><div class="meta"><span class="tag ${m}">${NAMES[m]}</span><span><b>${meta.seconds}s</b> server time</span><span>${meta.width}×${meta.height}</span><span>${meta.steps} steps</span><span>seed ${meta.seed}</span>${meta.peak_vram_gb != null ? `<span>${meta.peak_vram_gb} GB peak</span>` : ""}</div>`;
       if (meta.cost_usd != null && spend) { spend.today += meta.cost_usd; spend.total += meta.cost_usd; falHint(); }
       const img = slots[i].querySelector("img"); img.src = src; img.alt = cap; img.onclick = () => lightbox(src, cap);
       document.querySelectorAll(".gen.new").forEach(x => x.classList.remove("new"));

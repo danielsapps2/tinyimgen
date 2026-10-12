@@ -19,7 +19,7 @@ import numpy as np
 from PIL import Image
 
 import landmarks
-from texture import detect_face
+from texture import detect_face, empty_cache
 
 CLOSE = 768            # close-up size in px (Hunyuan sees 518 px; the bake's 3x upscale is finer than the atlas)
 GREY = 0.85            # background the crops are composited on (klein's "plain light grey")
@@ -825,7 +825,7 @@ def run(job_dir, views, klein_fn, gpu_lock, progress=lambda msg: None, stats=Non
             finally:
                 import gc
                 gc.collect()
-                torch.cuda.empty_cache()
+                empty_cache()
     pd = os.path.join(job_dir, "parts")
     os.makedirs(pd, exist_ok=True)
     front, back, haired = views["front"], views.get("back"), views.get("haired")

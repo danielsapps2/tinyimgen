@@ -1,14 +1,20 @@
-"""Two-model text-to-image engine tuned for a 6 GB Turing GPU (RTX 2060).
+"""Two-model text-to-image engine tuned for a 6 GB Turing GPU (RTX 2060), with an Apple-silicon path.
 
+CUDA:
 * Everything runs in fp16 (Turing has no fast bf16: 3.6 vs 23 TFLOPS measured).
 * Transformer and text-encoder blocks live in pinned RAM and are streamed through
   the GPU by LayerStreamer, so peak VRAM stays under ~3.7 GB at 1024x1024.
 * FLUX.2-klein-4B and Z-Image-Turbo use the identical Qwen3-4B text encoder,
   so one streamed copy serves both.
+
+Apple silicon (MPS) and CPU: memory is unified, so there is nothing to stream. Whole pipelines sit on the device;
+on Macs whose Metal working set can't hold klein (~16 GB) one component at a time is (model offload). nunchaku is
+CUDA-only, so Z-Image runs the stock bf16 transformer (fp16 overflows to black images), and klein then shares bf16.
 """
 import ctypes
 import gc
 import os
+import sys
 import threading
 import time
 
@@ -20,6 +26,8 @@ import torch
 from huggingface_hub import hf_hub_download
 from PIL import Image
 
+from . import device
+from .device import CUDA, DEVICE
 from .gpulock import gpu_lock
 from .stream import LayerStreamer, cpu_embedding
 
@@ -66,7 +74,16 @@ class Engine:
         self.progress = {"busy": False, "step": 0, "steps": 0, "model": None}
         self.pipes = {}
         t0 = time.time()
+        if CUDA:
+            self._load_streamed(models)
+        else:
+            self._load_unified(models)
+        gc.collect()
+        if sys.platform.startswith("linux"):
+            ctypes.CDLL("libc.so.6").malloc_trim(0)  # hand fp32->fp16 conversion scratch back to the OS
+        self.load_seconds = time.time() - t0
 
+    def _load_streamed(self, models):
         from diffusers import Flux2KleinPipeline
         klein = Flux2KleinPipeline.from_pretrained("black-forest-labs/FLUX.2-klein-4B", torch_dtype=DT)
         causal = klein.text_encoder
@@ -97,9 +114,35 @@ class Engine:
             z.vae.cuda(); z.vae.enable_tiling()
             self.pipes["zimage"] = z
 
-        gc.collect()
-        ctypes.CDLL("libc.so.6").malloc_trim(0)  # hand fp32->fp16 conversion scratch back to the OS
-        self.load_seconds = time.time() - t0
+    def _load_unified(self, models):
+        from diffusers import Flux2KleinPipeline
+        dt = torch.bfloat16 if "zimage" in models else DT  # the shared encoder must match the bf16 Z-Image
+        if os.environ.get("TINYIMGEN_DTYPE") == "bf16":
+            dt = torch.bfloat16
+        mem = device.memory_gb()
+        need = 18 + (13 if "zimage" in models else 0)  # klein 4B + Qwen3-4B ≈ 16 GB; Z-Image 6B adds ≈ 12 GB
+        offload = DEVICE != "cpu" and mem < need
+        if offload and "zimage" in models:
+            raise RuntimeError(f"Z-Image needs about {need} GB of GPU memory; this Mac offers {mem:.0f} GB. "
+                               "Run without --zimage.")
+        klein = Flux2KleinPipeline.from_pretrained("black-forest-labs/FLUX.2-klein-4B", torch_dtype=dt)
+        klein.text_encoder.lm_head = torch.nn.Identity()  # weight-tied to the embedding; pipelines read hidden states
+        lm = klein.text_encoder.model
+        if offload:
+            # keep only the active component (encoder, transformer or VAE) in Metal's working set
+            klein.enable_model_cpu_offload(device=DEVICE)
+        else:
+            klein.to(DEVICE)
+        klein.vae.enable_tiling()
+        self.offload = offload
+        if "klein" in models:
+            self.pipes["klein"] = klein
+        if "zimage" in models:
+            from diffusers import ZImagePipeline
+            z = ZImagePipeline.from_pretrained("Tongyi-MAI/Z-Image-Turbo", text_encoder=lm, torch_dtype=torch.bfloat16)
+            z.to(DEVICE)
+            z.vae.enable_tiling()
+            self.pipes["zimage"] = z
 
     def generate(self, model, prompt, width=1024, height=1024, steps=None, seed=None, refs=None):
         """refs: optional list of PIL reference images (klein multi-reference editing)."""
@@ -123,14 +166,14 @@ class Engine:
             finally:
                 # Hand cached VRAM back so other GPU apps (e.g. the 3D pipeline) can use it;
                 # the next image re-allocates in well under a second.
-                torch.cuda.empty_cache()
+                device.empty_cache()
                 self.progress.update(busy=False, waiting=False)
 
     def _run(self, pipe, model, prompt, width, height, steps, seed, refs, on_step):
-        torch.cuda.synchronize(); torch.cuda.reset_peak_memory_stats()
+        device.synchronize(); device.reset_peak()
         t = time.time()
         kwargs = dict(prompt=prompt, width=width, height=height, num_inference_steps=steps,
-                      generator=torch.Generator("cuda").manual_seed(seed),
+                      generator=device.generator(seed),
                       callback_on_step_end=on_step)
         if model == "zimage":
             kwargs["guidance_scale"] = 0.0
@@ -140,16 +183,18 @@ class Engine:
             kwargs["image"] = list(refs)
         try:
             img = pipe(**kwargs).images[0]
-        except torch.OutOfMemoryError:
+        except (torch.OutOfMemoryError, RuntimeError) as e:
+            if not device.is_oom(e):
+                raise
             # Another process grew its VRAM mid-run; release our cache and retry once.
-            gc.collect(); torch.cuda.empty_cache()
-            kwargs["generator"] = torch.Generator("cuda").manual_seed(seed)
+            gc.collect(); device.empty_cache()
+            kwargs["generator"] = device.generator(seed)
             self.progress["step"] = 0
             img = pipe(**kwargs).images[0]
-        torch.cuda.synchronize()
+        device.synchronize()
         return img, {
             "model": model, "prompt": prompt, "width": width, "height": height, "steps": steps,
             "seed": seed, "seconds": round(time.time() - t, 2),
-            "peak_vram_gb": round(torch.cuda.max_memory_allocated() / 1e9, 2),
+            "peak_vram_gb": device.peak_gb(),
         }
 

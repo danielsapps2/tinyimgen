@@ -22,6 +22,7 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 # transfer took 8 min instead of ~1 s. Must be set before numpy is imported.
 os.environ.setdefault("NUMPY_MADVISE_HUGEPAGE", "0")
 
+from tinyimgen import device  # noqa: E402  (before torch: MPS fallback switch)
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
@@ -319,7 +320,7 @@ def main(job_dir):
             layers[name] = tuple(t.cpu() for t in layer)  # park in RAM: klein needs the VRAM between our stages
         stats["texture_seconds"]["project"] = round(time.time() - t_tex - stats["texture_seconds"]["model"], 1)
         tex8 = model.bake({k: v for k, v in layers.items()}, stats, own=own)
-        torch.cuda.empty_cache()
+        device.empty_cache()
     Image.fromarray(tex8).save(os.path.join(job_dir, "albedo_pass1.png"))
     job.stage("texture", "done", f"{len(model.F):,} tris · {stats['texels_seen_pct']}% seen")
 
@@ -338,7 +339,7 @@ def main(job_dir):
             fit = (fs, fW / 2 - fs * (u.min() + u.max()) / 2, fty)
             with gpu_lock():
                 render, sil = model.render(tex8, cam, right, fit, fH, fW)
-                torch.cuda.empty_cache()
+                device.empty_cache()
             rpath = os.path.join(job_dir, "views", f"{name}_render.png")
             Image.fromarray(render).save(rpath)
             asset = "game character" if human else "game asset"
@@ -363,7 +364,7 @@ def main(job_dir):
             with gpu_lock():
                 for k, layer in model.repaint_layers(name, rgba, ok, sil, cam, right, fit, POWER, stats).items():
                     final_layers[k] = tuple(t.cpu() for t in layer)
-                torch.cuda.empty_cache()
+                device.empty_cache()
             repaints[name] = (rgba, render, fit)   # aligned: the mirror fallback inherits the drift correction
         # a side without a usable head (face turned, or misaligned) borrows it from the mirrored opposite side
         with gpu_lock():
@@ -378,7 +379,7 @@ def main(job_dir):
                 if layer is not None:
                     final_layers[name + "_mirror"] = tuple(t.cpu() for t in layer)
             tex8 = model.bake(final_layers, stats, own=own)
-            torch.cuda.empty_cache()
+            device.empty_cache()
         job.stage("refine", "done", f"{len(angles)} views repainted")
     else:
         job.stage("refine", "skipped", "draft quality")
@@ -403,7 +404,7 @@ def main(job_dir):
                 hl["back"] = hm.project(hback, *camera(180), (fb[0] * ENHANCE, fb[1] * ENHANCE, fb[2] * ENHANCE, fb[3]),
                                         POWER, 1.0)
             htex = hm.bake(hl, stats.setdefault("hair_bake", {}))
-            torch.cuda.empty_cache()
+            device.empty_cache()
         # the sides of the hair: nothing above sees them. klein repaints head-framed renders of body + hair seen
         # from each side (with the haired close-up for the look), registered back onto the render and projected
         head = model.sculpt_info.get("head")
@@ -418,7 +419,7 @@ def main(job_dir):
                 fit = (S, parts.CLOSE / 2 - S * float(c @ right), parts.CLOSE / 2 + S * float(c[1]))
                 with gpu_lock():
                     render = render_scene([(model, tex8), (hm, htex)], cam, right, fit, parts.CLOSE, parts.CLOSE)
-                    torch.cuda.empty_cache()
+                    device.empty_cache()
                 rpath = os.path.join(job_dir, "views", f"{name}_render.png")
                 Image.fromarray(render).save(rpath)
                 meta = klein(SERVER, HAIR_SIDE.format(view=VIEW_WORDS[name.replace("hair_", "")]),
@@ -456,7 +457,7 @@ def main(job_dir):
             if sides:
                 with gpu_lock():
                     htex = hm.bake(hl, stats["hair_bake"])
-                    torch.cuda.empty_cache()
+                    device.empty_cache()
         Image.fromarray(htex).save(os.path.join(job_dir, "hair_albedo.png"))
         items.append(("hair", hm, htex))
         # hair cap: the body's scalp takes the hair colour where the images show hair (seen through any gap)
@@ -479,7 +480,7 @@ def main(job_dir):
                 tex8, n = model.paint_cap(tex8, lay)
                 items[0] = ("body", model, tex8)
                 stats["hair_cap_texels"] = n
-                torch.cuda.empty_cache()
+                device.empty_cache()
 
     # 6. export + thumbnail
     job.stage("export", "running")
@@ -494,7 +495,7 @@ def main(job_dir):
         cam, right = camera(30)
         thumb = render_scene([(m, tx) for _, m, tx in items], cam, right, model.orbit_fit(right, 768, 512), 768, 512,
                              bg=(0.86, 0.86, 0.85))
-        torch.cuda.empty_cache()
+        device.empty_cache()
     Image.fromarray(thumb).save(os.path.join(job_dir, "thumb.png"))
     job.data["outputs"] = {"game": "game.glb", "textured": "textured.glb", "shape": "shape.glb",
                            "albedo": "albedo.png", "thumb": "thumb.png"}
@@ -529,7 +530,7 @@ def run_tripo(job, cfg, source, tpose):
     V, F, UV, tex = tripo.load(raw)
     with gpu_lock():
         az = tripo.front_azimuth(V, F, UV, tex)
-        torch.cuda.empty_cache()
+        device.empty_cache()
     stats["front_azimuth"] = az if az is not None else "no face found (Tripo default, 90)"
     V = tripo.normalise(V, 90 if az is None else az, height)
     tripo.export(V, F, UV, tex, os.path.join(job.dir, "textured.glb"), normals=tripo.smooth_normals(V, F))
@@ -548,7 +549,7 @@ def run_tripo(job, cfg, source, tpose):
         c = np.array([(u.min() + u.max()) / 2 * np.cos(a), (lo[1] + hi[1]) / 2, -(u.min() + u.max()) / 2 * np.sin(a)])
         half = max(0.5 * (hi[1] - lo[1]) / 0.88, 0.5 * np.ptp(u) / 0.94 * 768 / 512)   # fit height and (T-pose) width
         thumb = tripo.render(V, F, UV, tex, c, half, 30, size=768, W=512, bg=0.86)
-        torch.cuda.empty_cache()
+        device.empty_cache()
     Image.fromarray(thumb).save(os.path.join(job.dir, "thumb.png"))
     # "shape" is what the viewer's second mode and download show: for Tripo, the full-detail textured model (the raw
     # download, tripo_raw.glb, faces +X at Tripo's own scale)

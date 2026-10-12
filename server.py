@@ -15,6 +15,7 @@ import time
 import uuid
 from typing import Literal
 
+from tinyimgen import device  # picks CUDA / Apple MPS / CPU; must load before torch (MPS CPU-fallback switch)
 import torch
 import uvicorn
 from PIL import Image, UnidentifiedImageError
@@ -30,7 +31,8 @@ SHOWCASE = os.path.join(OUT, "showcase")
 UPLOADS = os.path.join(OUT, "uploads")
 JOBS = os.path.join(OUT, "3d")
 VENV3D = os.path.join(ROOT, ".venv3d", "bin", "python")
-BLENDER = next((b for b in (os.environ.get("TINYIMGEN_BLENDER"), os.path.expanduser("~/Tools/blender-build/bin/blender"))
+BLENDER = next((b for b in (os.environ.get("TINYIMGEN_BLENDER"), os.path.expanduser("~/Tools/blender-build/bin/blender"),
+                            "/Applications/Blender.app/Contents/MacOS/Blender")
                 if b and os.path.exists(b)), None)
 MOCAP = os.path.join(OUT, "mocap")
 for d in (GALLERY, SHOWCASE, UPLOADS, JOBS):
@@ -110,11 +112,10 @@ class GenRequest(BaseModel):
 def info():
     from tinyimgen.falgen import FAL_MODELS
     from tinyimgen.engine import MODELS
-    free, total = torch.cuda.mem_get_info()
     eng = state["engine"]
     return {
-        "gpu": torch.cuda.get_device_name(0),
-        "vram_total_gb": round(total / 1e9, 2),
+        "gpu": device.name(),
+        "vram_total_gb": round(device.memory_gb(), 2),
         "ready": eng is not None,
         "error": state["error"],
         "load_seconds": round(eng.load_seconds, 1) if eng else None,
@@ -165,7 +166,9 @@ def generate(req: GenRequest):
             img, meta = eng.generate(req.model, req.prompt, req.width, req.height, req.steps, req.seed, refs)
         except ValueError as e:
             raise HTTPException(400, str(e))
-        except torch.OutOfMemoryError:
+        except (torch.OutOfMemoryError, RuntimeError) as e:
+            if not device.is_oom(e):
+                raise
             raise HTTPException(503, "GPU out of memory — another app is using VRAM; close it or retry")
     meta["refs"] = req.refs
     name = f"{int(time.time() * 1000)}_{req.model}.webp"
@@ -533,7 +536,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=7860)
-    ap.add_argument("--zimage", action="store_true", help="also load Z-Image Turbo (INT4, needs nunchaku)")
+    ap.add_argument("--zimage", action="store_true", help="also load Z-Image Turbo (INT4 via nunchaku on CUDA, stock bf16 on Apple silicon)")
     a = ap.parse_args()
     if a.zimage:
         state["models"] = ("klein", "zimage")

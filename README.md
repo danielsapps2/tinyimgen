@@ -21,6 +21,30 @@ Weights are pinned in host RAM.
 
 The first image after startup is about 1.5 s slower while the GPU kernels warm up.
 
+## Apple silicon (Mac)
+
+The same site runs on an M-series Mac through PyTorch's Metal (MPS) backend. Setup and first run:
+
+```bash
+./setup_mac.sh                        # both venvs + FLUX.2 klein weights (~16 GB download)
+.venv/bin/python server.py            # http://127.0.0.1:7860
+```
+
+`setup_mac.sh --zimage` also downloads Z-Image Turbo, and `--local3d` installs the local Hunyuan3D-2 engine.
+
+How it differs from the RTX 2060 build (`tinyimgen/device.py` picks the device; `TINYIMGEN_DEVICE=cuda|mps|cpu` overrides):
+- **No layer streaming.** Unified memory has no PCIe link to hide, so whole pipelines sit on the GPU.
+  - Metal working set ≥ 18 GB (32 GB Macs and up): everything stays resident.
+  - Smaller Macs: diffusers model offload keeps one component (text encoder, transformer or VAE) active at a time. A 16 GB Mac will swap; 24 GB works but is slower than 32 GB.
+- **Z-Image** runs the stock bf16 transformer: nunchaku's INT4 kernels are CUDA-only, and fp16 Z-Image produces black images. It needs about 31 GB of working set (a 48 GB Mac or larger). With `--zimage` klein also runs in bf16, because the two share the text encoder.
+- **klein** runs in fp16, as on CUDA. Set `TINYIMGEN_DTYPE=bf16` if you see black or noisy images.
+- **Seeds** use a CPU generator, so a seed gives a different image than on the CUDA machine.
+- **"GB peak"** on a card shows what Metal holds after the run; MPS has no peak counter.
+- **3D:** Tripo (the default) runs on fal, and the export, rigging and thumbnails run on MPS. Ops MPS lacks fall back to the CPU (`PYTORCH_ENABLE_MPS_FALLBACK=1`, set automatically). MPS has no float64; the export, rig and texture-bake paths were checked for float64 tensors on the GPU (none).
+- **Local 3D engine** (`--local3d`): Hunyuan3D-2's shape model stays fully on the GPU (no component swapping). This path has not been run on a Mac yet.
+- **Blender** (FBX export and imports): `/Applications/Blender.app` is found automatically, or set `TINYIMGEN_BLENDER`.
+- The `bench_*.py` scripts are CUDA-only.
+
 ## What makes it fit
 
 - **fp16 only.** On this card fp16 matmul measured 23 TFLOPS and bf16 measured 3.6 TFLOPS (bf16 is emulated on Turing).
