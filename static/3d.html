@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinyImGen 3D</title>
+<script>window.MODE = location.pathname.startsWith("/objects") ? "object" : "human";</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="left">
+      <div class="brand"><div class="logo">t</div>TinyImGen</div>
+      <nav class="tabs"><a href="/">Image Studio</a><a href="/3d" id="tab-human">3D Humans</a><a href="/objects" id="tab-object">3D Objects</a><a href="/explorer">Explorer</a><a href="/showcase">Showcase</a></nav>
+    </div>
+    <div class="pills">
+      <span class="pill mono" id="gpu">GPU …</span>
+      <span class="pill"><span class="dot" id="dot"></span><span id="ready">Loading models…</span></span>
+      <button class="themebtn" id="theme" type="button">Theme</button>
+    </div>
+  </header>
+
+  <section style="margin-top:18px">
+    <h2 id="pagetitle">3D Human Creator</h2>
+    <p class="sub" id="pagesub">Turn a character image into a rigged, animated game character — Tripo H3.1 (on fal) builds the textured model, or run it all on this GPU with Hunyuan3D-2 and klein.</p>
+    <div class="card studio3d">
+      <div class="controls">
+        <div>
+          <label class="l">Source image</label>
+          <div class="src" id="src"><div class="empty">Click to choose a generation, upload or 3D render<br>— or drop an image file here.<br><br><span id="srchint">Best results: full body, A-pose, plain background.</span></div></div>
+        </div>
+        <div>
+          <label class="l">Extra views <span style="text-transform:none;letter-spacing:0;font-weight:400">· optional</span></label>
+          <div class="viewslots">
+            <div class="vslot" data-k="back">Back view<br><small>empty = klein makes it</small></div>
+            <div class="vslot" data-k="left">Left side<br><small>faces image-left</small></div>
+            <div class="vslot" data-k="right">Right side<br><small>faces image-right</small></div>
+          </div>
+          <div class="hint" id="viewshint">Sides are optional — the texture pass repaints them from the mesh anyway.</div>
+        </div>
+        <div>
+          <label class="l" for="describe">Description</label>
+          <textarea id="describe" style="min-height:70px" placeholder="e.g. western gunslinger, brown leather duster, red bandana, blue jeans"></textarea>
+          <div class="hint">Guides klein when it paints the hidden sides. Filled in from the source prompt when known.</div>
+        </div>
+        <div class="human-only">
+          <label class="l">Pose</label>
+          <div class="seg" id="pose">
+            <button data-v="keep" class="on" type="button">Keep as is<small>use the source pose</small></button>
+            <button data-v="tpose" type="button">T-pose<small>klein re-poses it · +25 s</small></button>
+          </div>
+          <div class="hint">T-pose keeps arms and hands clear of the body, so they texture cleanly and rig easily.</div>
+        </div>
+        <div>
+          <label class="l">3D engine</label>
+          <div class="seg" id="engine">
+            <button data-v="tripo" class="on" type="button">Tripo H3.1<small>cloud (fal) · ~$0.3–0.4</small></button>
+            <button data-v="local" type="button">Local<small>Hunyuan3D + klein · free</small></button>
+          </div>
+          <div class="hint" id="enginehint"></div>
+        </div>
+        <div>
+          <label class="l">Quality</label>
+          <div class="seg" id="quality">
+            <button data-v="draft" type="button">Draft<small></small></button>
+            <button data-v="standard" class="on" type="button">Standard<small></small></button>
+            <button data-v="high" type="button">High<small></small></button>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label class="l">Triangles</label>
+            <div class="seg" id="faces">
+              <button data-v="10000" type="button">10k</button>
+              <button data-v="30000" class="on" type="button">30k</button>
+              <button data-v="60000" type="button">60k</button>
+            </div>
+          </div>
+          <div style="max-width:120px">
+            <label class="l" for="height">Height (m)</label>
+            <input type="number" id="height" value="1.8" min="0.1" max="20" step="0.1">
+          </div>
+        </div>
+        <div class="human-only">
+          <label class="l">Rig + animations</label>
+          <div class="seg" id="rig">
+            <button data-v="1" class="on" type="button">On<small>skeleton + 6 clips · ~10 s</small></button>
+            <button data-v="0" type="button">Off<small>static model only</small></button>
+          </div>
+          <div class="hint">Humanoid skeleton (Unity / Godot humanoid bone names) with Idle, Walk, Run, Walk backward and Strafe left/right, sized to this character. Skipped automatically for non-humanoids.</div>
+        </div>
+        <button class="go" id="go" type="button" disabled>Build 3D model</button>
+        <ul class="stages" id="stages"></ul>
+        <div class="status"><span id="stxt"></span><span class="mono" id="timer"></span></div>
+        <div class="errbox" id="err" hidden></div>
+      </div>
+      <div class="viewer">
+        <model-viewer id="mv" camera-controls touch-action="pan-y" shadow-intensity="0.8" exposure="1.05"
+          environment-image="neutral" camera-orbit="25deg 80deg auto" interaction-prompt="auto" alt="3D model preview"></model-viewer>
+        <div class="empty" id="vempty">Your 3D model appears here.<br>Drag to rotate · scroll to zoom · right-drag to pan.</div>
+        <div class="vbar" id="clipbar" hidden>
+          <div class="seg" id="clips"></div>
+          <div class="row-gap"><span class="hint mono" id="clipinfo" style="margin:0"></span><a class="btn2" id="playlink" href="/play">Play (WASD) →</a></div>
+        </div>
+        <div class="vbar">
+          <div class="seg" id="mode" style="min-width:230px">
+            <button data-v="game" class="on" type="button">Textured</button>
+            <button data-v="shape" type="button">Raw shape</button>
+            <button data-v="spin" type="button">Auto-rotate</button>
+          </div>
+          <div class="row-gap" id="dl"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="gh"><h2 id="libtitle">Your 3D humans</h2><p class="sub" style="margin:0">Saved to <span class="mono">out/3d/</span></p></div>
+    <div class="models" id="models" style="margin-top:14px"></div>
+    <div class="emptygen" id="mempty" hidden>Nothing here yet. Build one above, or import a GLB / FBX / OBJ in the <a href="/explorer">Explorer</a>.</div>
+  </section>
+
+  <footer>Tripo H3.1 via fal.ai (paid per model). Rig and animations: tinyimgen's own auto-rigger (MediaPipe Pose for joint fitting). Local shape: Hunyuan3D-2mv / 2mini (Tencent Hunyuan community license — not licensed in the EU, UK or South Korea). Texture: FLUX.2 [klein] 4B (Apache-2.0). Viewer: Google model-viewer.</footer>
+</div>
+
+<div class="lb" id="lb"><img id="lbimg" alt=""><div class="cap" id="lbcap"></div></div>
+
+<script src="/static/common.js"></script>
+<script>
+// one page, two modes: /3d builds rigged, animated humans; /objects builds static props and assets
+const HUMAN = window.MODE === "human";
+document.getElementById("tab-" + window.MODE).classList.add("on");
+if (!HUMAN) {
+  document.title = "TinyImGen 3D Objects";
+  document.getElementById("pagetitle").textContent = "3D Object Creator";
+  document.getElementById("pagesub").textContent = "Turn an image of a prop, weapon, vehicle, building or any other object into a textured, game-ready GLB (no skeleton). Tripo H3.1 (on fal) builds it, or run it all on this GPU.";
+  document.getElementById("srchint").textContent = "Best results: the whole object, three-quarter view, plain background.";
+  document.getElementById("describe").placeholder = "e.g. rusty iron lantern with a glass panel and a brass handle";
+  document.getElementById("libtitle").textContent = "Your 3D objects";
+  document.querySelectorAll(".human-only").forEach(e => e.hidden = true);
+  document.getElementById("height").value = "1.0";
+}
+let source = null, current = null, polling = null, jobs = [];
+const views = { back: null, left: null, right: null };
+const opt = { quality: "standard", faces: 30000, pose: "keep", engine: "tripo", rig: HUMAN };
+const CLIP_LABELS = { Idle: "Idle", Walk: "Walk", Run: "Run", WalkBackward: "Back", StrafeLeft: "Strafe L", StrafeRight: "Strafe R" };
+const QUALITY_HINTS = {
+  tripo: { draft: "standard geometry", standard: "detailed geometry", high: "+ detailed texture" },
+  local: { draft: "~1.5 min", standard: "~3.5 min", high: "~5.5 min" },
+};
+let hasFal = true;
+function engineUI() {
+  for (const b of $("#quality").children) b.querySelector("small").textContent = QUALITY_HINTS[opt.engine][b.dataset.v];
+  $("#viewshint").textContent = opt.engine === "tripo"
+    ? "Tripo uses extra views only when all three are given (and not with T-pose); otherwise it builds from the front."
+    : "Sides are optional — the texture pass repaints them from the mesh anyway.";
+  $("#enginehint").textContent = opt.engine === "tripo"
+    ? (hasFal ? "Shape and texture from Tripo, then decimated here to the triangle budget. Full-detail GLB included."
+              : "No fal API key: save it to ~/.config/tinyimgen/fal_key (or set FAL_KEY before starting the server).")
+    : "Runs entirely on this GPU (~4–10 min).";
+}
+const mv = $("#mv");
+mv.addEventListener("load", () => { mv.dataset.state = "loaded"; $("#vempty").hidden = true; });
+mv.addEventListener("error", e => {
+  mv.dataset.state = "error";
+  $("#vempty").hidden = false;
+  $("#vempty").textContent = "Couldn't display this model (" + (e.detail?.type || "load error") + "). Download it below instead.";
+});
+
+function seg(id, cb) {
+  $(id).addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (id !== "#mode" || b.dataset.v !== "spin") [...$(id).children].forEach(x => { if (x.dataset.v !== "spin") x.classList.toggle("on", x === b); });
+    cb(b);
+  });
+}
+seg("#quality", b => opt.quality = b.dataset.v);
+seg("#faces", b => opt.faces = +b.dataset.v);
+seg("#pose", b => opt.pose = b.dataset.v);
+seg("#engine", b => { opt.engine = b.dataset.v; engineUI(); });
+seg("#rig", b => opt.rig = b.dataset.v === "1");
+let rigInfo = null;
+seg("#clips", b => playClip(b.dataset.v));
+function playClip(name) {
+  [...$("#clips").children].forEach(x => x.classList.toggle("on", x.dataset.v === name));
+  mv.animationName = name; mv.play({ repetitions: Infinity });
+  const c = rigInfo?.clips.find(c => c.name === name);
+  $("#clipinfo").textContent = c ? (c.speed ? `${c.speed.toFixed(2)} m/s · ${c.seconds.toFixed(2)} s loop` : `${c.seconds.toFixed(1)} s loop`) : "";
+}
+engineUI();
+seg("#mode", b => {
+  if (b.dataset.v === "spin") { const on = !mv.hasAttribute("auto-rotate"); mv.toggleAttribute("auto-rotate", on); b.classList.toggle("on", on); return; }
+  showModel(current, b.dataset.v);
+});
+
+async function promptFor(ref) {
+  try { const lib = await (await fetch("/api/library")).json(); const it = lib.generations.find(g => g.ref === ref); return it ? it.prompt : ""; }
+  catch (e) { return ""; }
+}
+async function setSource(it) {
+  source = it;
+  const s = $("#src"); s.innerHTML = ""; const img = el("img"); img.src = it.url; img.alt = it.label || "source"; s.append(img);
+  if (!$("#describe").value) $("#describe").value = (it.prompt || await promptFor(it.ref) || "").slice(0, 600);
+  $("#go").disabled = !ready;
+}
+function setView(k, it) {
+  views[k] = it;
+  const slot = $(`.vslot[data-k="${k}"]`);
+  if (!it) { slot.innerHTML = { back: "Back view<br><small>empty = klein makes it</small>", left: "Left side<br><small>faces image-left</small>", right: "Right side<br><small>faces image-right</small>" }[k]; return; }
+  slot.innerHTML = ""; const img = el("img"); img.src = it.url; img.alt = k;
+  const x = el("button", "x", "×"); x.type = "button"; x.className = "x"; x.style.cssText = "width:18px;height:18px;border-radius:50%;border:0;background:rgba(0,0,0,.65);color:#fff;font-size:12px;line-height:18px;padding:0;cursor:pointer";
+  x.onclick = e => { e.stopPropagation(); setView(k, null); };
+  slot.append(img, x);
+}
+function dropTarget(node, onFile) {
+  node.addEventListener("dragover", e => { e.preventDefault(); node.classList.add("drop"); });
+  node.addEventListener("dragleave", () => node.classList.remove("drop"));
+  node.addEventListener("drop", async e => {
+    e.preventDefault(); node.classList.remove("drop");
+    const f = [...e.dataTransfer.files].find(f => f.type.startsWith("image/")); if (!f) return;
+    try { onFile(await uploadFile(f)); } catch (err) { alert("Upload failed: " + err.message); }
+  });
+}
+$("#src").onclick = () => openPicker({ title: "Choose the source image", max: 1, onPick: p => p[0] && setSource(p[0]) });
+dropTarget($("#src"), setSource);
+document.querySelectorAll(".vslot").forEach(slot => {
+  const k = slot.dataset.k;
+  slot.onclick = () => openPicker({ title: `Choose the ${k} view`, max: 1, onPick: p => p[0] && setView(k, p[0]) });
+  dropTarget(slot, it => setView(k, it));
+});
+
+let ready = false;
+pollInfo(i => {
+  ready = i.ready && i.has_3d;
+  if (hasFal !== !!i.has_fal) { hasFal = !!i.has_fal; engineUI(); }
+  if (!i.has_3d) { $("#stxt").textContent = "3D tools not installed (.venv3d) — see README"; }
+  $("#go").disabled = !(ready && source);
+});
+
+function drawStages(j) {
+  const ul = $("#stages"); ul.innerHTML = "";
+  for (const s of j.stages) {
+    const li = el("li", s.state);
+    li.append(el("span", "ic"), el("span", null, s.label), el("span", "s", s.seconds != null ? s.seconds + "s" : ""));
+    if (s.detail) li.append(el("span", "d", s.detail));
+    ul.append(li);
+  }
+  $("#err").hidden = !j.error; $("#err").textContent = j.error ? j.error + "  (log: out/3d/" + j.id + "/log.txt)" : "";
+}
+
+function fileUrl(j, f) { return `/media/3d/${j.id}/${f}?v=${j.elapsed || 0}-${j.rig?.stamp || 0}`; }
+function showModel(j, which = "game") {
+  if (!j || j.status !== "done") return;
+  current = j;
+  mv.dataset.state = "loading";
+  $("#vempty").hidden = false; $("#vempty").textContent = "Loading model…";
+  const rigged = which === "game" && j.outputs.rigged;
+  mv.src = fileUrl(j, which === "shape" ? j.outputs.shape : rigged ? j.outputs.rigged : j.outputs.game);
+  $("#clipbar").hidden = !rigged;
+  if (rigged) {
+    $("#playlink").href = "/play?id=" + encodeURIComponent(j.id);
+    $("#clips").innerHTML = "";
+    for (const name of j.rig?.clips || Object.keys(CLIP_LABELS)) {
+      const b = el("button", null, CLIP_LABELS[name] || name); b.type = "button"; b.dataset.v = name; $("#clips").append(b);
+    }
+    rigInfo = null;
+    fetch(fileUrl(j, j.outputs.rig)).then(r => r.json()).then(r => { rigInfo = r; playClip(mv.animationName || "Idle"); }).catch(() => {});
+    mv.addEventListener("load", () => playClip("Idle"), { once: true });
+  } else { mv.pause?.(); }
+  [...$("#mode").children].forEach(x => { if (x.dataset.v !== "spin") x.classList.toggle("on", x.dataset.v === which); });
+  const dl = $("#dl"); dl.innerHTML = "";
+  $("#mode").querySelector('[data-v="shape"]').textContent = j.outputs.full ? "Full detail" : "Raw shape";
+  const files = [["Game GLB", j.outputs.game], ["Texture PNG", j.outputs.albedo], [j.outputs.full ? "Full-detail GLB" : "Raw shape GLB", j.outputs.shape]]
+    .filter(([, f], i, arr) => f && arr.findIndex(([, g]) => g === f) === i);
+  if (j.outputs.fbx) files.unshift(["Rigged FBX", j.outputs.fbx]);
+  if (j.outputs.rigged) files.unshift(["Rigged GLB · 6 clips", j.outputs.rigged]);
+  if (j.outputs.prop) files.unshift(["Prop GLB (grips)", j.outputs.prop]);
+  for (const [label, f] of files) {
+    const a = el("a", "btn2", label); a.href = fileUrl(j, f); a.download = `${j.id}_${f}`; dl.append(a);
+  }
+  if (!j.outputs.rigged && HUMAN) {
+    const r = el("button", "btn2", j.rig?.state === "running" ? "Rigging…" : "Rig + animate"); r.type = "button";
+    if (j.rig?.state === "skipped" || j.rig?.state === "error") r.title = j.rig.detail;
+    r.disabled = j.rig?.state === "running";
+    r.onclick = () => rigExisting(j, r);
+    dl.append(r);
+  }
+  if (!HUMAN) { const g = el("a", "btn2", j.outputs.prop ? "Edit grips ✋ →" : "Make holdable ✋ →"); g.href = "/prop-editor?id=" + encodeURIComponent(j.id); dl.append(g); }
+  if (j.outputs.thumb) { const use = el("a", "btn2", "Use render as reference →"); use.href = "/?ref=" + encodeURIComponent(`3d/${j.id}/thumb.png`); dl.append(use); }
+  drawStages(j);
+  const st = j.stats || {};
+  if (rigged && j.rig?.warnings?.length) { $("#err").hidden = false; $("#err").textContent = j.rig.warnings.join(" "); }
+  $("#stxt").textContent = j.config.engine === "import" ? `${(st.triangles || 0).toLocaleString()} tris · imported ${j.config.file || ""}`
+    : `${(st.triangles || 0).toLocaleString()} tris · ${j.config.height} m · built in ${Math.round(j.elapsed || 0)}s`;
+  $("#timer").textContent = "";
+  document.querySelectorAll(".mcard").forEach(c => c.classList.toggle("on", c.dataset.id === j.id));
+}
+
+async function rigExisting(j, btn) {
+  btn.disabled = true; btn.textContent = "Rigging…"; $("#err").hidden = true;
+  const r = await fetch(`/api/3d/${j.id}/rig`, { method: "POST" });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); btn.disabled = false; btn.textContent = "Rig + animate"; $("#err").hidden = false; $("#err").textContent = e.detail || r.statusText; return; }
+  const poll = setInterval(async () => {
+    let k; try { k = await (await fetch("/api/3d/" + j.id)).json(); } catch (e) { return; }
+    const st = k.rig?.state;
+    if (st === "running") { $("#stxt").textContent = "Rigging · " + (k.rig.detail || ""); return; }
+    clearInterval(poll);
+    await loadJobs();
+    if (st === "done") showModel(k);
+    else { btn.disabled = false; btn.textContent = "Rig + animate"; $("#err").hidden = false; $("#err").textContent = "Couldn't rig this model: " + (k.rig?.detail || "unknown error"); }
+  }, 1000);
+}
+
+function drawModels() {
+  const g = $("#models"); g.innerHTML = ""; $("#mempty").hidden = jobs.length > 0;
+  for (const j of jobs) {
+    const c = el("button", "mcard"); c.type = "button"; c.dataset.id = j.id;
+    const th = el("div", "th");
+    if (j.status === "done" && j.outputs.thumb) { const img = el("img"); img.loading = "lazy"; img.src = fileUrl(j, j.outputs.thumb); img.alt = "3D model"; th.append(img); }
+    else if (j.status === "done") th.textContent = "rendering preview…";
+    else if (j.source_url) { const img = el("img"); img.src = j.source_url; img.alt = "source"; img.style.opacity = ".45"; th.append(img); }
+    const b = el("div", "b");
+    const when = new Date(j.created * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    b.append(el("div", null, j.title || when));
+    b.append(el("div", "st", j.status === "done" ? (j.config.engine === "import" ? "imported" : `${j.config.engine === "tripo" ? "Tripo" : j.config.quality} · ${Math.round(j.elapsed || 0)}s`) : j.status === "running" || j.status === "queued" ? "building…" : "failed"));
+    c.append(th, b);
+    c.onclick = () => { if (j.status === "done") showModel(j); else { drawStages(j); if (j.status === "running") watch(j.id); } };
+    g.append(c);
+  }
+  if (current) document.querySelectorAll(".mcard").forEach(c => c.classList.toggle("on", c.dataset.id === current.id));
+}
+
+async function loadJobs() { jobs = await (await fetch("/api/3d?kind=" + window.MODE)).json(); drawModels(); return jobs; }
+
+function watch(id) {
+  clearInterval(polling);
+  const t0 = performance.now();
+  $("#go").disabled = true;
+  polling = setInterval(async () => {
+    let j; try { j = await (await fetch("/api/3d/" + id)).json(); } catch (e) { return; }
+    drawStages(j);
+    const run = j.stages.find(s => s.state === "running");
+    $("#stxt").textContent = run ? run.label + (run.detail ? " · " + run.detail : "") : j.status;
+    $("#timer").textContent = Math.round(j.elapsed || (performance.now() - t0) / 1000) + "s";
+    if (j.status === "done" || j.status === "error") {
+      clearInterval(polling); $("#go").disabled = !(ready && source);
+      await loadJobs();
+      if (j.status === "done") showModel(j);
+    }
+  }, 1000);
+}
+
+$("#go").onclick = async () => {
+  if (!source) return;
+  $("#err").hidden = true;
+  const body = { source: source.ref, describe: $("#describe").value.trim(), quality: opt.quality, faces: opt.faces, pose: HUMAN ? opt.pose : "keep", engine: opt.engine, rig: HUMAN && opt.rig, kind: window.MODE,
+                 height: +$("#height").value || 1.8, back: views.back?.ref || null, left: views.left?.ref || null, right: views.right?.ref || null };
+  const r = await fetch("/api/3d", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) { $("#err").hidden = false; $("#err").textContent = j.detail || r.statusText; return; }
+  drawStages(j); await loadJobs(); watch(j.id);
+};
+
+(async () => {
+  const pre = refFromUrlParam("src"); if (pre) setSource(pre);
+  await loadJobs();
+  const wantJob = new URLSearchParams(location.search).get("job");     // deep link from the Explorer
+  const done = jobs.find(j => j.id === wantJob && j.status === "done") || jobs.find(j => j.status === "done");
+  if (done) showModel(done);  // keep something to look at while a new one builds
+  const running = jobs.find(j => j.status === "running" || j.status === "queued");
+  if (running) {
+    if (!source && running.source_url) setSource({ ref: running.config.source, url: running.source_url, label: "source" });
+    drawStages(running); watch(running.id);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinyImGen Showcase</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="left">
+      <div class="brand"><div class="logo">t</div>TinyImGen</div>
+      <nav class="tabs"><a href="/">Image Studio</a><a href="/3d">3D Humans</a><a href="/objects">3D Objects</a><a href="/explorer">Explorer</a><a href="/showcase" class="on">Showcase</a></nav>
+    </div>
+    <div class="pills">
+      <span class="pill mono" id="gpu">GPU …</span>
+      <span class="pill"><span class="dot" id="dot"></span><span id="ready">Loading models…</span></span>
+      <button class="themebtn" id="theme" type="button">Theme</button>
+    </div>
+  </header>
+
+  <div class="hero">
+    <h1>Frontier-quality images on a <em>6&nbsp;GB</em> RTX&nbsp;2060, in about 9&nbsp;seconds.</h1>
+    <p>FLUX.2 klein 4B, streamed layer-by-layer from system RAM so it fits a 20-series card — shown next to Z-Image Turbo for comparison. Everything below was rendered on this machine.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="k">klein · 1 MP</div><div class="v" id="s-klein">—</div><div class="s">median, 4 steps fp16</div></div>
+    <div class="stat"><div class="k">Z-Image · 1 MP</div><div class="v" id="s-zimage">—</div><div class="s">median, 8 steps INT4</div></div>
+    <div class="stat"><div class="k">Peak VRAM</div><div class="v" id="s-vram">—</div><div class="s">of 6 GB, incl. VAE decode</div></div>
+    <div class="stat"><div class="k">Showcase</div><div class="v" id="s-count">—</div><div class="s">images, both models</div></div>
+  </div>
+
+  <section>
+    <div class="toolbar">
+      <div><h2>Showcase</h2><p class="sub" style="margin:0">12 prompts covering the things small models usually fail at — text, hands, fur, glass, lighting.</p></div>
+      <div class="seg" id="view">
+        <button data-v="klein" class="on" type="button">klein 4B</button>
+        <button data-v="both" type="button">Side by side</button>
+        <button data-v="zimage" type="button">Z-Image</button>
+      </div>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <section>
+    <h2>How it fits in 6 GB</h2>
+    <p class="sub">Measured on this RTX 2060 (Turing, PCIe 3.0, 5.6 GiB usable).</p>
+    <div class="how">
+      <div class="card"><h3>fp16 everywhere</h3><p>Turing has no fast bf16: measured 23 TFLOPS fp16 vs 3.6 TFLOPS bf16. Stock Z-Image overflows to black in fp16; the SVDQuant INT4 build stays stable and is 1.6× faster.</p></div>
+      <div class="card"><h3>Layer streaming</h3><p>Weights sit in pinned RAM; block <i>i+1</i> copies over PCIe (13 GB/s) while block <i>i</i> computes. A 6B model peaks under 1 GB of VRAM for the transformer.</p></div>
+      <div class="card"><h3>One shared text encoder</h3><p>Both models use the bit-identical Qwen3-4B encoder. One streamed copy serves both: 0.6 s per prompt vs 12.6 s on CPU.</p></div>
+    </div>
+    <div class="card tablewrap" style="margin-top:12px;box-shadow:none">
+      <table>
+        <thead><tr><th>Configuration</th><th>1024² time</th><th>Peak VRAM</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td>FLUX.2 klein 4B · fp16 · streamed · 4 steps</td><td class="num">≈ 9 s</td><td class="num">3.6 GB</td><td>Clean · default</td></tr>
+          <tr><td>Z-Image Turbo · SVDQuant INT4 r128 · streamed · 8 steps</td><td class="num">≈ 16 s</td><td class="num">2.9 GB</td><td>Clean · optional</td></tr>
+          <tr><td>Z-Image Turbo · stock fp16 · streamed · 8 steps</td><td class="num">≈ 26 s</td><td class="num">3.1 GB</td><td>Black image (fp16 overflow)</td></tr>
+          <tr><td>Qwen3-4B text encoder on CPU (Ryzen 5 3600X)</td><td class="num">12.6 s</td><td class="num">—</td><td>Too slow</td></tr>
+          <tr><td>Qwen3-4B text encoder streamed on GPU</td><td class="num">0.6 s</td><td class="num">0.6 GB</td><td>Used</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>TinyImGen · FLUX.2 [klein] 4B by Black Forest Labs (Apache-2.0) · Z-Image Turbo by Tongyi-MAI (Apache-2.0), INT4 weights by Nunchaku/MIT Han Lab.</footer>
+</div>
+
+<div class="lb" id="lb"><img id="lbimg" alt=""><div class="cap" id="lbcap"></div></div>
+
+<script src="/static/common.js"></script>
+<script>
+let view = "klein", showcase = [];
+
+$("#view").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  [...$("#view").children].forEach(x => x.classList.toggle("on", x === b));
+  view = b.dataset.v; render();
+});
+
+function figure(src, m, secs, cap) {
+  const f = document.createElement("figure");
+  f.innerHTML = `<img loading="lazy" alt=""><span class="tag ${m}">${NAMES[m]}</span>${secs ? `<span class="t mono">${secs.toFixed(1)}s</span>` : ""}`;
+  const img = f.querySelector("img"); img.src = src; img.alt = cap; img.onclick = () => lightbox(src, cap);
+  return f;
+}
+
+function render() {
+  const g = $("#grid"); g.innerHTML = "";
+  for (const it of showcase) {
+    const card = document.createElement("div"); card.className = "item";
+    const imgs = document.createElement("div"); imgs.className = "imgs" + (view === "both" ? " two" : "");
+    for (const m of (view === "both" ? ["klein", "zimage"] : [view])) {
+      const r = it.results[m]; if (!r) continue;
+      imgs.append(figure("/media/showcase/" + r.file, m, r.seconds, `${NAMES[m]} · ${r.seconds}s · ${it.prompt}`));
+    }
+    const cap = document.createElement("div"); cap.className = "cap";
+    cap.innerHTML = `<div class="h"><b></b><a class="use" style="text-decoration:none">Try in Image Studio →</a></div><p></p>`;
+    cap.querySelector("b").textContent = `${it.tag} · ${it.width}×${it.height}`;
+    cap.querySelector("p").textContent = it.prompt;
+    cap.querySelector("a").href = "/?prompt=" + encodeURIComponent(it.prompt);
+    card.append(imgs, cap); g.append(card);
+  }
+}
+
+function median(a) { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; }
+
+async function load() {
+  const d = await (await fetch("/api/showcase")).json();
+  showcase = d.items || [];
+  const t = { klein: [], zimage: [] }; let vram = 0, n = 0;
+  for (const it of showcase) for (const [m, r] of Object.entries(it.results)) { t[m].push(r.seconds); vram = Math.max(vram, r.peak_vram_gb); n++; }
+  const mk = median(t.klein), mz = median(t.zimage);
+  $("#s-klein").textContent = mk ? mk.toFixed(1) + " s" : "—";
+  $("#s-zimage").textContent = mz ? mz.toFixed(1) + " s" : "—";
+  $("#s-vram").textContent = vram ? vram.toFixed(1) + " GB" : "—";
+  $("#s-count").textContent = n || "—";
+  render();
+}
+
+pollInfo(); load();
+</script>
+</body>
+</html>

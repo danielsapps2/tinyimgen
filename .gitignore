@@ -1,0 +1,17 @@
+# environments
+.venv/
+.venv3d/
+__pycache__/
+*.pyc
+
+# generated output, logs, scratch test models
+out/
+logs/
+/*.glb
+
+# third-party checkouts (see README: Environment)
+third_party/Hunyuan3D-2/
+
+# secrets (the fal key lives in ~/.config/tinyimgen/fal_key or FAL_KEY)
+.env
+*.key

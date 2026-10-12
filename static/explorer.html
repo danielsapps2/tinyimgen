@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinyImGen Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
+<style>
+  .xbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 14px 0 12px; }
+  .xbar .seg { min-width: 0; }
+  .xbar input[type=search], .xbar select { font: inherit; font-size: 13.5px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); }
+  .xbar input[type=search] { flex: 1 1 220px; min-width: 160px; }
+  .chip { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .chip.on { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+  .count { font-weight: 400; opacity: .7; margin-left: 4px; }
+  .selbar { position: sticky; top: 8px; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--accent); box-shadow: var(--shadow); margin-bottom: 12px; }
+  .selbar .n { font-weight: 700; margin-right: 6px; }
+  .xgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--card, 180px), 1fr)); gap: 12px; }
+  .xcard { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; cursor: pointer; }
+  .xcard.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .xcard .th { aspect-ratio: 1; background: var(--surface-2); display: grid; place-items: center; color: var(--muted); font-size: 12px; overflow: hidden; }
+  .xcard .th img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .xcard[data-kind=human] .th img, .xcard[data-kind=object] .th img { object-fit: contain; }
+  .xcard .b { padding: 8px 10px 9px; font-size: 12.5px; }
+  .xcard .t { font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; min-height: 2.7em; }
+  .xcard .m { color: var(--muted); margin-top: 3px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .badge { font-size: 10.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; padding: 1px 6px; border-radius: 5px; background: var(--surface-2); color: var(--muted); }
+  .badge.human { color: var(--klein); } .badge.object { color: var(--ok); } .badge.image { color: var(--accent); } .badge.other { color: var(--zimage); }
+  .star, .tick { position: absolute; top: 8px; width: 30px; height: 30px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer; background: rgba(0,0,0,.45); color: #fff; font-size: 16px; line-height: 1; }
+  .star { right: 8px; } .star.on { color: #ffcc33; }
+  .tick { left: 8px; opacity: 0; font-size: 14px; } .xcard:hover .tick, .xgrid.selecting .tick, .xcard.sel .tick { opacity: 1; }
+  .xcard.sel .tick { background: var(--accent); color: var(--accent-ink); }
+  .status { position: absolute; bottom: 64px; left: 8px; font-size: 11px; padding: 2px 7px; border-radius: 6px; background: rgba(0,0,0,.55); color: #fff; }
+  .drop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 18%, transparent); border: 3px dashed var(--accent); font-size: 22px; font-weight: 700; color: var(--text); pointer-events: none; }
+  /* detail drawer */
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100vw); z-index: 20; background: var(--surface); border-left: 1px solid var(--line); box-shadow: -10px 0 30px rgba(0,0,0,.18); display: flex; flex-direction: column; }
+  .drawer .pv { background: radial-gradient(ellipse at 50% 40%, var(--surface), var(--surface-2)); height: min(52vh, 460px); display: grid; place-items: center; position: relative; }
+  .drawer .pv img, .drawer .pv video { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .drawer .pv model-viewer { width: 100%; height: 100%; --poster-color: transparent; background: transparent; }
+  .drawer .body { padding: 14px 16px 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 12px; }
+  .drawer .close { position: absolute; top: 10px; right: 10px; z-index: 2; }
+  .drawer .nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; }
+  .drawer .nav.prev { left: 8px; } .drawer .nav.next { right: 8px; }
+  .drawer input.title { font: inherit; font-size: 16px; font-weight: 700; width: 100%; padding: 6px 8px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text); }
+  .drawer input.title:hover, .drawer input.title:focus { border-color: var(--line); background: var(--surface-2); }
+  .drawer input.tags { font: inherit; font-size: 13px; width: 100%; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); }
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; font-size: 12.5px; }
+  .kv .k { color: var(--muted); } .kv .v { word-break: break-word; }
+  .rowbtns { display: flex; flex-wrap: wrap; gap: 8px; }
+  .drawer .body > div:first-child .btn2 { white-space: nowrap; flex: none; }
+  .btn2.danger { color: #d4422c; }
+  .clips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .empty-x { padding: 60px 20px; text-align: center; color: var(--muted); }
+  @media (max-width: 640px) { .xgrid { --card: 140px !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="left">
+      <div class="brand"><div class="logo">t</div>TinyImGen</div>
+      <nav class="tabs"><a href="/">Image Studio</a><a href="/3d">3D Humans</a><a href="/objects">3D Objects</a><a href="/explorer" class="on">Explorer</a><a href="/showcase">Showcase</a></nav>
+    </div>
+    <div class="pills">
+      <span class="pill mono" id="gpu">GPU …</span>
+      <span class="pill"><span class="dot" id="dot"></span><span id="ready">Loading models…</span></span>
+      <button class="themebtn" id="theme" type="button">Theme</button>
+    </div>
+  </header>
+
+  <section style="margin-top:18px">
+    <div class="gh">
+      <h2>Explorer</h2>
+      <div class="row-gap">
+        <button class="btn2" id="importbtn" type="button">Import…</button>
+        <input type="file" id="importfile" multiple hidden accept="image/*,.glb,.fbx,.obj,.zip">
+        <button class="btn2" id="selectbtn" type="button">Select</button>
+      </div>
+    </div>
+    <p class="sub" style="margin:4px 0 0">Everything you've made: images, 3D humans, 3D objects and the rest. Drop images, GLB / FBX / OBJ files or an exported .zip anywhere on this page to import them.</p>
+    <div class="xbar">
+      <div class="row-gap" id="kinds"></div>
+    </div>
+    <div class="xbar">
+      <input type="search" id="q" placeholder="Search names, prompts, tags…">
+      <select id="sort" aria-label="Sort">
+        <option value="new">Newest first</option><option value="old">Oldest first</option><option value="name">Name A–Z</option>
+        <option value="size">Largest first</option><option value="fav">Favorites first</option>
+      </select>
+      <button class="chip" id="favonly" type="button">★ Favorites</button>
+      <button class="chip" id="pipeline" type="button" title="Images the 3D pipeline made along the way (T-poses, back views, repaints)">Pipeline images</button>
+      <input type="range" id="zoom" min="130" max="320" step="10" value="180" aria-label="Card size" style="width:110px">
+    </div>
+    <div class="selbar" id="selbar" hidden>
+      <span class="n" id="seln"></span>
+      <button class="btn2" data-act="all" type="button">Select all shown</button>
+      <button class="btn2" data-act="fav" type="button">★ Favorite</button>
+      <button class="btn2" data-act="unfav" type="button">☆ Unfavorite</button>
+      <button class="btn2" data-act="human" type="button">Move to Humans</button>
+      <button class="btn2" data-act="object" type="button">Move to Objects</button>
+      <button class="btn2" data-act="export" type="button">Export .zip</button>
+      <label class="hint" style="margin:0;display:flex;gap:5px;align-items:center"><input type="checkbox" id="fullx"> full-detail meshes</label>
+      <button class="btn2 danger" data-act="delete" type="button">Delete</button>
+      <button class="btn2" data-act="clear" type="button">Done</button>
+    </div>
+    <div class="xgrid" id="grid"></div>
+    <div class="empty-x" id="empty" hidden>Nothing here yet.</div>
+  </section>
+</div>
+
+<aside class="drawer" id="drawer" hidden>
+  <div class="pv" id="pv">
+    <button class="btn2 close" id="dclose" type="button">✕</button>
+    <button class="btn2 nav prev" id="dprev" type="button" aria-label="Previous">‹</button>
+    <button class="btn2 nav next" id="dnext" type="button" aria-label="Next">›</button>
+  </div>
+  <div class="body" id="dbody"></div>
+</aside>
+<div class="drop" id="drop" hidden>Drop to import</div>
+<div class="lb" id="lb"><img id="lbimg" alt=""><div class="cap" id="lbcap"></div></div>
+
+<script src="/static/common.js"></script>
+<script>
+const KINDS = [["all", "All"], ["image", "Images"], ["human", "3D Humans"], ["object", "3D Objects"], ["other", "Other"]];
+const ui = { kind: "all", q: "", sort: "new", fav: false, pipeline: false, zoom: 180 };
+try { Object.assign(ui, JSON.parse(localStorage.getItem("explorer") || "{}")); } catch (e) {}
+const save = () => { try { localStorage.setItem("explorer", JSON.stringify(ui)); } catch (e) {} };
+let items = [], counts = {}, shown = [], selected = new Set(), selecting = false, openId = null;
+
+pollInfo();
+const fmtSize = b => b > 1e9 ? (b / 1e9).toFixed(1) + " GB" : b > 1e6 ? (b / 1e6).toFixed(1) + " MB" : b > 1e3 ? Math.round(b / 1e3) + " KB" : b + " B";
+const fmtDate = t => new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+const SUB = { generation: "generated", upload: "upload", pipeline: "pipeline", video: "video", tripo: "Tripo", local: "local", import: "imported" };
+
+async function load() {
+  const r = await (await fetch("/api/explorer")).json();
+  items = r.items; counts = r.counts;
+  drawKinds(); draw();
+  if (openId) { const it = items.find(i => i.id === openId); it ? openItem(it, false) : closeDrawer(); }
+  // 3D models still building or rendering a preview: refresh until they settle
+  if (items.some(i => (i.kind === "human" || i.kind === "object") && (i.status === "running" || i.status === "queued" || (i.status === "done" && !i.thumb))))
+    setTimeout(load, 4000);
+}
+
+function drawKinds() {
+  const box = $("#kinds"); box.innerHTML = "";
+  const pipe = items.filter(i => i.sub === "pipeline").length;
+  for (const [k, label] of KINDS) {
+    const n = k === "all" ? items.length - (ui.pipeline ? 0 : pipe) : (counts[k] || 0) - (k === "other" && !ui.pipeline ? pipe : 0);
+    const b = el("button", "chip" + (ui.kind === k ? " on" : "")); b.type = "button";
+    b.append(label, el("span", "count", n));
+    b.onclick = () => { ui.kind = k; save(); drawKinds(); draw(); };
+    box.append(b);
+  }
+  $("#favonly").classList.toggle("on", ui.fav);
+  $("#pipeline").classList.toggle("on", ui.pipeline);
+}
+
+function filtered() {
+  const q = ui.q.trim().toLowerCase();
+  let r = items.filter(i => (ui.kind === "all" || i.kind === ui.kind) && (ui.pipeline || i.sub !== "pipeline") && (!ui.fav || i.favorite));
+  if (q) r = r.filter(i => [i.title, i.info?.prompt, i.info?.describe, ...(i.tags || []), i.sub, i.kind].join(" ").toLowerCase().includes(q));
+  const by = { new: (a, b) => b.created - a.created, old: (a, b) => a.created - b.created, name: (a, b) => a.title.localeCompare(b.title),
+               size: (a, b) => b.size - a.size, fav: (a, b) => (b.favorite - a.favorite) || (b.created - a.created) }[ui.sort];
+  return r.sort(by);
+}
+
+function draw() {
+  shown = filtered();
+  const g = $("#grid"); g.innerHTML = ""; g.style.setProperty("--card", ui.zoom + "px");
+  g.classList.toggle("selecting", selecting);
+  $("#empty").hidden = shown.length > 0;
+  $("#empty").textContent = items.length ? "Nothing matches." : "Nothing here yet — generate something in the Image Studio or import files.";
+  const frag = document.createDocumentFragment();
+  for (const it of shown) {
+    const c = el("div", "xcard" + (selected.has(it.id) ? " sel" : "")); c.dataset.kind = it.kind; c.dataset.id = it.id;
+    const th = el("div", "th");
+    if (it.thumb) { const img = el("img"); img.loading = "lazy"; img.decoding = "async"; img.src = it.thumb; img.alt = ""; th.append(img); }
+    else th.textContent = it.status === "done" ? "rendering preview…" : (it.status || "no preview");
+    const star = el("button", "star" + (it.favorite ? " on" : ""), it.favorite ? "★" : "☆"); star.type = "button"; star.title = "Favorite";
+    star.onclick = e => { e.stopPropagation(); setMeta([it.id], { favorite: !it.favorite }); };
+    const tick = el("button", "tick", "✓"); tick.type = "button"; tick.title = "Select";
+    tick.onclick = e => { e.stopPropagation(); toggleSel(it.id, e.shiftKey); };
+    const b = el("div", "b");
+    b.append(el("div", "t", it.title));
+    const m = el("div", "m");
+    m.append(el("span", "badge " + it.kind, it.kind === "human" ? "human" : it.kind === "object" ? "object" : it.kind === "image" ? "image" : SUB[it.sub] || "other"),
+             el("span", null, fmtDate(it.created)));
+    if (it.size) m.append(el("span", null, "· " + fmtSize(it.size)));
+    if (it.holdable) m.append(el("span", "badge object", it.holdable.hands === 2 ? "✋✋ holdable" : "✋ holdable"));
+    b.append(m);
+    c.append(th, star, tick, b);
+    if ((it.kind === "human" || it.kind === "object") && it.status && it.status !== "done") c.append(el("span", "status", it.status));
+    c.onclick = e => { if (selecting || e.ctrlKey || e.metaKey || e.shiftKey) toggleSel(it.id, e.shiftKey); else openItem(it); };
+    frag.append(c);
+  }
+  g.append(frag);
+  drawSel();
+}
+
+let lastSel = null;
+function toggleSel(id, range) {
+  if (range && lastSel) {   // shift: select the run between the last pick and this one
+    const a = shown.findIndex(i => i.id === lastSel), b = shown.findIndex(i => i.id === id);
+    for (let k = Math.min(a, b); k <= Math.max(a, b); k++) selected.add(shown[k].id);
+  } else selected.has(id) ? selected.delete(id) : selected.add(id);
+  lastSel = id; selecting = selecting || selected.size > 0;
+  draw();
+}
+function drawSel() {
+  $("#selbar").hidden = !selecting;
+  $("#seln").textContent = `${selected.size} selected`;
+  const sel = items.filter(i => selected.has(i.id));
+  const has3d = sel.some(i => i.kind === "human" || i.kind === "object");
+  document.querySelectorAll('#selbar [data-act=human], #selbar [data-act=object]').forEach(b => b.hidden = !has3d);
+  document.querySelectorAll('#selbar [data-act]').forEach(b => { if (!["all", "clear"].includes(b.dataset.act)) b.disabled = !selected.size; });
+  $("#selectbtn").textContent = selecting ? "Done" : "Select";
+}
+$("#selectbtn").onclick = () => { selecting = !selecting; if (!selecting) selected.clear(); draw(); };
+$("#selbar").addEventListener("click", async e => {
+  const a = e.target.closest("[data-act]")?.dataset.act; if (!a) return;
+  const ids = [...selected];
+  if (a === "all") { shown.forEach(i => selected.add(i.id)); draw(); }
+  else if (a === "clear") { selected.clear(); selecting = false; draw(); }
+  else if (a === "fav" || a === "unfav") await setMeta(ids, { favorite: a === "fav" });
+  else if (a === "human" || a === "object") await setMeta(ids.filter(i => i.startsWith("3d:")), { kind: a });
+  else if (a === "export") await exportZip(ids);
+  else if (a === "delete") await del(ids);
+});
+
+async function setMeta(ids, patch) {
+  if (!ids.length) return;
+  const r = await fetch("/api/explorer/meta", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, ...patch }) });
+  if (!r.ok) { alert((await r.json()).detail || "Couldn't save"); return; }
+  for (const it of items) if (ids.includes(it.id)) {
+    if ("favorite" in patch) it.favorite = patch.favorite;
+    if (patch.title != null) it.title = patch.title || it.title;
+    if (patch.tags) it.tags = patch.tags;
+    if (patch.kind) { counts[it.kind]--; it.kind = patch.kind; counts[it.kind] = (counts[it.kind] || 0) + 1; }
+  }
+  drawKinds(); draw();
+  if (openId && ids.includes(openId)) openItem(items.find(i => i.id === openId), false);
+}
+
+async function del(ids) {
+  if (!ids.length || !confirm(`Move ${ids.length} item${ids.length > 1 ? "s" : ""} to the trash folder (out/trash)?`)) return;
+  const r = await fetch("/api/explorer/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
+  if (!r.ok) { alert((await r.json()).detail || "Couldn't delete"); return; }
+  ids.forEach(i => selected.delete(i));
+  if (ids.includes(openId)) closeDrawer();
+  await load();
+}
+
+async function exportZip(ids) {
+  if (!ids.length) return;
+  const btn = document.querySelector('#selbar [data-act=export]'); const old = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = "Exporting…"; }
+  try {
+    const r = await fetch("/api/explorer/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, full: $("#fullx").checked }) });
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    const blob = await r.blob();
+    const name = (r.headers.get("content-disposition") || "").match(/filename="?([^"]+)"?/)?.[1] || "tinyimgen_export.zip";
+    const a = el("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  } catch (e) { alert("Export failed: " + e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = old; }
+}
+
+// ---------- import: button, or drop files anywhere ----------
+async function importFiles(files) {
+  const list = [...files]; if (!list.length) return;
+  let ok = 0; const errs = [];
+  for (const [n, f] of list.entries()) {
+    $("#importbtn").textContent = `Importing ${n + 1}/${list.length}…`;
+    const r = await fetch("/api/explorer/import?name=" + encodeURIComponent(f.name), { method: "POST", body: f });
+    if (r.ok) ok++; else errs.push((await r.json().catch(() => ({}))).detail || f.name);
+  }
+  $("#importbtn").textContent = "Import…";
+  if (errs.length) alert(`Imported ${ok} of ${list.length}.\n\n` + errs.join("\n"));
+  await load();
+}
+$("#importbtn").onclick = () => $("#importfile").click();
+$("#importfile").onchange = e => { importFiles(e.target.files); e.target.value = ""; };
+let dragDepth = 0;
+addEventListener("dragenter", e => { if ([...e.dataTransfer.types].includes("Files")) { dragDepth++; $("#drop").hidden = false; } });
+addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("#drop").hidden = true; } });
+addEventListener("dragover", e => e.preventDefault());
+addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; $("#drop").hidden = true; importFiles(e.dataTransfer.files); });
+
+// ---------- detail drawer ----------
+function closeDrawer() { openId = null; $("#drawer").hidden = true; const mv = $("#pv model-viewer"); if (mv) mv.remove(); }
+$("#dclose").onclick = closeDrawer;
+const step = d => { const k = shown.findIndex(i => i.id === openId); const it = shown[(k + d + shown.length) % shown.length]; if (it) openItem(it); };
+$("#dprev").onclick = () => step(-1); $("#dnext").onclick = () => step(1);
+addEventListener("keydown", e => {
+  if (e.target.matches("input, textarea, select")) return;
+  if (e.key === "Escape") { if (!$("#drawer").hidden) closeDrawer(); else if (selecting) { selected.clear(); selecting = false; draw(); } }
+  if (!$("#drawer").hidden && (e.key === "ArrowLeft" || e.key === "ArrowRight")) step(e.key === "ArrowLeft" ? -1 : 1);
+  if (!$("#drawer").hidden && e.key === "f") { const it = items.find(i => i.id === openId); if (it) setMeta([it.id], { favorite: !it.favorite }); }
+});
+
+function openItem(it, refreshPreview = true) {
+  openId = it.id; $("#drawer").hidden = false;
+  const pv = $("#pv");
+  if (refreshPreview || !pv.querySelector("img, video, model-viewer")) {
+    pv.querySelectorAll("img, video, model-viewer, .empty").forEach(n => n.remove());
+    if (it.kind === "human" || it.kind === "object") {
+      if (it.preview) {
+        const mv = document.createElement("model-viewer");
+        Object.assign(mv, { src: it.preview + "?v=" + Date.now() }); mv.setAttribute("camera-controls", ""); mv.setAttribute("shadow-intensity", "0.8");
+        mv.setAttribute("environment-image", "neutral"); mv.setAttribute("camera-orbit", "25deg 80deg auto"); mv.setAttribute("alt", it.title);
+        if (it.rigged) { mv.setAttribute("autoplay", ""); mv.setAttribute("animation-name", "Idle"); }
+        pv.append(mv);
+      } else pv.append(el("div", "empty", it.status === "done" ? "No preview" : "Still building…"));
+    } else if (it.sub === "video") { const v = el("video"); v.src = it.preview; v.controls = true; v.loop = true; v.muted = true; v.autoplay = true; pv.append(v); }
+    else { const img = el("img"); img.src = it.preview; img.alt = it.title; img.onclick = () => lightbox(it.preview, it.title); img.style.cursor = "zoom-in"; pv.append(img); }
+  }
+  const body = $("#dbody"); body.innerHTML = "";
+  const title = el("input", "title"); title.value = it.title; title.title = "Rename";
+  title.onchange = () => setMeta([it.id], { title: title.value.trim() });
+  const top = el("div"); top.style.cssText = "display:flex;gap:8px;align-items:center";
+  const fav = el("button", "btn2", it.favorite ? "★ Favorite" : "☆ Favorite"); fav.type = "button";
+  fav.onclick = () => setMeta([it.id], { favorite: !it.favorite });
+  top.append(title, fav);
+  const meta = el("div", "m"); meta.style.cssText = "display:flex;gap:6px;align-items:center;color:var(--muted);font-size:12.5px;flex-wrap:wrap";
+  meta.append(el("span", "badge " + it.kind, it.kind), el("span", null, (SUB[it.sub] || it.sub) + " · " + fmtDate(it.created) + (it.size ? " · " + fmtSize(it.size) : "")));
+  body.append(top, meta);
+
+  if (it.rigged && it.clips?.length) {
+    const clips = el("div", "clips");
+    for (const c of it.clips) { const b = el("button", "chip" + (c === "Idle" ? " on" : ""), c); b.type = "button";
+      b.onclick = () => { const mv = $("#pv model-viewer"); if (!mv) return; mv.animationName = c; mv.play({ repetitions: Infinity }); clips.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === b)); };
+      clips.append(b); }
+    body.append(clips);
+  }
+  const tags = el("input", "tags"); tags.placeholder = "Tags, comma separated"; tags.value = (it.tags || []).join(", ");
+  tags.onchange = () => setMeta([it.id], { tags: tags.value.split(",").map(t => t.trim()).filter(Boolean) });
+  body.append(tags);
+
+  const acts = el("div", "rowbtns");
+  const link = (label, href) => { const a = el("a", "btn2", label); a.href = href; acts.append(a); };
+  if (it.kind === "image" || it.sub === "pipeline") {
+    link("Use as reference →", "/?ref=" + encodeURIComponent(it.ref));
+    link("3D human →", "/3d?src=" + encodeURIComponent(it.ref));
+    link("3D object →", "/objects?src=" + encodeURIComponent(it.ref));
+  }
+  if (it.kind === "human" || it.kind === "object") {
+    link(it.kind === "human" ? "Open in 3D Humans →" : "Open in 3D Objects →", (it.kind === "human" ? "/3d" : "/objects") + "?job=" + it.job);
+    if (it.rigged) link("Play (WASD) →", "/play?id=" + it.job);
+    if (it.kind === "object" && it.status === "done") link(it.holdable ? "Edit grips ✋ →" : "Make holdable ✋ →", "/prop-editor?id=" + it.job);
+    if (it.ref) link("Use render as reference →", "/?ref=" + encodeURIComponent(it.ref));
+    const mv = el("button", "btn2", it.kind === "human" ? "Move to Objects" : "Move to Humans"); mv.type = "button";
+    mv.onclick = () => setMeta([it.id], { kind: it.kind === "human" ? "object" : "human" });
+    acts.append(mv);
+  }
+  const ex = el("button", "btn2", "Export .zip"); ex.type = "button"; ex.onclick = () => exportZip([it.id]); acts.append(ex);
+  const dl = el("button", "btn2 danger", "Delete"); dl.type = "button"; dl.onclick = () => del([it.id]); acts.append(dl);
+  body.append(acts);
+
+  if (it.files?.length) {
+    const files = el("div"); files.append(el("label", "l", "Download"));
+    const row = el("div", "rowbtns");
+    for (const f of it.files) { const a = el("a", "btn2", `${f.label} · ${fmtSize(f.size)}`); a.href = f.url; a.download = `${it.title.slice(0, 40).replace(/[^\w\- ]+/g, "").trim() || "tinyimgen"}_${f.name}`; row.append(a); }
+    files.append(row); body.append(files);
+  }
+  const info = Object.entries(it.info || {}).filter(([, v]) => v !== null && v !== "" && !(Array.isArray(v) && !v.length));
+  if (info.length) {
+    const kv = el("div", "kv");
+    const LABEL = { prompt: "Prompt", model: "Model", width: "Width", height: "Height", seed: "Seed", steps: "Steps", seconds: "Time (s)", cost_usd: "Cost (USD)",
+                    refs: "References", engine: "Engine", quality: "Quality", height_m: "Height (m)", triangles: "Triangles", source: "Source image", describe: "Description" };
+    for (const [k, v] of info) kv.append(el("div", "k", LABEL[k] || k), el("div", "v", Array.isArray(v) ? v.join(", ") : typeof v === "number" ? (+v.toFixed(3)).toLocaleString() : String(v)));
+    body.append(kv);
+  }
+}
+
+// ---------- toolbar ----------
+$("#q").value = ui.q; $("#sort").value = ui.sort; $("#zoom").value = ui.zoom;
+let qt; $("#q").oninput = () => { clearTimeout(qt); qt = setTimeout(() => { ui.q = $("#q").value; save(); draw(); }, 150); };
+$("#sort").onchange = () => { ui.sort = $("#sort").value; save(); draw(); };
+$("#favonly").onclick = () => { ui.fav = !ui.fav; save(); drawKinds(); draw(); };
+$("#pipeline").onclick = () => { ui.pipeline = !ui.pipeline; save(); drawKinds(); draw(); };
+$("#zoom").oninput = () => { ui.zoom = +$("#zoom").value; save(); $("#grid").style.setProperty("--card", ui.zoom + "px"); };
+load();
+</script>
+</body>
+</html>

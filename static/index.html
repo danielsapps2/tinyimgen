@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinyImGen Image Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="left">
+      <div class="brand"><div class="logo">t</div>TinyImGen</div>
+      <nav class="tabs"><a href="/" class="on">Image Studio</a><a href="/3d">3D Humans</a><a href="/objects">3D Objects</a><a href="/explorer">Explorer</a><a href="/showcase">Showcase</a></nav>
+    </div>
+    <div class="pills">
+      <span class="pill mono" id="gpu">GPU …</span>
+      <span class="pill"><span class="dot" id="dot"></span><span id="ready">Loading models…</span></span>
+      <button class="themebtn" id="theme" type="button">Theme</button>
+    </div>
+  </header>
+
+  <section style="margin-top:18px">
+    <h2>Image Studio</h2>
+    <p class="sub">Generate on the local GPU — about 9 seconds per 1-megapixel image with FLUX.2 klein 4B — or with a top cloud model on fal.ai, paid per image.</p>
+    <div class="card studio">
+      <div class="controls">
+        <div>
+          <label class="l" for="prompt">Prompt</label>
+          <textarea id="prompt">A cozy cyberpunk ramen shop at night in the rain, neon sign that reads "TINY GPU", reflections on wet pavement, cinematic</textarea>
+          <div class="chips" id="ideas" style="margin-top:8px"></div>
+        </div>
+        <div>
+          <label class="l">References <span style="text-transform:none;letter-spacing:0;font-weight:400">· optional, klein or a cloud model edits/combines them</span></label>
+          <div id="refs"></div>
+          <div class="hint" id="refhint">Pick generations, uploads or 3D renders — or drop image files here. e.g. "put the character from image 1 in the scene of image 2".</div>
+        </div>
+        <div>
+          <label class="l">Model</label>
+          <div class="seg" id="model">
+            <button data-v="klein" class="on" type="button">klein 4B<small>fastest · ~9 s</small></button>
+            <button data-v="zimage" type="button" hidden>Z-Image<small>best text · ~16 s</small></button>
+            <button data-v="both" type="button" hidden>Both<small>compare</small></button>
+          </div>
+          <div class="sub mono" id="zoff" style="margin:6px 0 0;font-size:12px">Z-Image off · start with <b>server.py --zimage</b> for exact in-image text</div>
+        </div>
+        <div>
+          <label class="l">Cloud · fal.ai <span style="text-transform:none;letter-spacing:0;font-weight:400">· paid per image</span></label>
+          <div class="seg" id="falmodel"></div>
+          <div class="hint" id="falhint"></div>
+        </div>
+        <div>
+          <label class="l">Aspect</label>
+          <div class="seg" id="aspect">
+            <button data-w="1024" data-h="1024" class="on" type="button">1:1</button>
+            <button data-w="1216" data-h="832" type="button">3:2</button>
+            <button data-w="832" data-h="1216" type="button">2:3</button>
+            <button data-w="1344" data-h="768" type="button">16:9</button>
+            <button data-w="768" data-h="768" type="button">Draft</button>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label class="l" for="seed">Seed</label>
+            <div class="seedrow"><input type="number" id="seed" placeholder="random" min="0"><button type="button" id="dice" title="Random seed">⟳</button></div>
+          </div>
+          <div>
+            <label class="l" for="steps">Steps</label>
+            <input type="number" id="steps" placeholder="default" min="1" max="12">
+          </div>
+        </div>
+        <button class="go" id="go" type="button" disabled>Generate</button>
+        <div>
+          <div class="bar"><i id="bar"></i></div>
+          <div class="status" style="margin-top:6px"><span id="stxt">Idle</span><span class="mono" id="timer"></span></div>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="canvas" id="canvas">
+          <div class="slot"><div class="empty">Your image appears here.<br>First run after startup warms the GPU kernels.</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="gh">
+      <h2>Your generations</h2>
+      <p class="sub" style="margin:0" id="gcount">Saved to <span class="mono">out/gallery/</span></p>
+    </div>
+    <div style="margin-top:14px">
+      <div class="gens" id="gens"></div>
+      <div class="emptygen" id="gempty" hidden>Nothing yet — your images will collect here.</div>
+    </div>
+  </section>
+
+  <footer>TinyImGen · cloud models via fal.ai (prices are fal's published rates; your fal dashboard has exact charges) · FLUX.2 [klein] 4B by Black Forest Labs (Apache-2.0) · Z-Image Turbo by Tongyi-MAI (Apache-2.0), INT4 weights by Nunchaku/MIT Han Lab.</footer>
+</div>
+
+<div class="lb" id="lb"><img id="lbimg" alt=""><div class="cap" id="lbcap"></div></div>
+
+<script src="/static/common.js"></script>
+<script>
+const IDEAS = [
+  ["Poster", 'A minimalist Swiss-style poster that says "SMALL GPU, BIG IDEAS" in bold Helvetica, red and white'],
+  ["Hands", "Close-up of an old watchmaker's hands assembling tiny gears under a magnifier, warm desk lamp"],
+  ["Glass", "A glass terrarium with a tiny glowing mushroom forest inside, on a windowsill at blue hour"],
+  ["Pixel", "16-bit pixel art of a lighthouse on a cliff during a thunderstorm, dramatic lightning"],
+  ["Street", "Street photo of a busy Hanoi intersection with scooters at dusk, motion blur, Leica look"],
+];
+let model = "klein", W = 1024, H = 1024, enabled = new Set(["klein"]), total = 0, falInfo = {}, hasFal = false, spend = null;
+const refs = refTray($("#refs"), { max: 4, onChange: items => {
+  $("#refhint").textContent = items.length
+    ? `${items.length} reference${items.length > 1 ? "s" : ""} · klein (roughly +9 s per reference) or a cloud model`
+    : 'Pick generations, uploads or 3D renders — or drop image files here. e.g. "put the character from image 1 in the scene of image 2".';
+} });
+const pre = refFromUrlParam("ref"); if (pre) refs.add(pre);
+
+function seg(id, cb) {
+  $(id).addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    [...$(id).children].forEach(x => x.classList.toggle("on", x === b)); cb(b);
+  });
+}
+function pick(id, match) {  // select a segmented-control button programmatically
+  const b = [...$(id).children].find(match); if (b && !b.hidden) b.click();
+}
+function setModel(v) {   // the local and cloud rows act as one choice
+  model = v;
+  for (const id of ["#model", "#falmodel"]) [...$(id).children].forEach(x => x.classList.toggle("on", x.dataset.v === v));
+  $("#steps").disabled = FAL.has(v); if (FAL.has(v)) $("#steps").value = "";
+  falHint();
+}
+$("#model").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setModel(b.dataset.v); });
+$("#falmodel").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setModel(b.dataset.v); });
+function money(x) { return "$" + (x < 0.1 ? x.toFixed(3).replace(/0$/, "") : x.toFixed(2)); }
+function falHint() {
+  const h = $("#falhint");
+  if (!hasFal) { h.textContent = "Add a fal API key to use these: save it to ~/.config/tinyimgen/fal_key"; return; }
+  const m = falInfo[model];
+  const sp = spend ? `Spent on fal: ${money(spend.today)} today · ${money(spend.total)} total (estimated)` : "";
+  h.textContent = m ? `${m.label}: ${m.detail} · ${m.price}. ${sp}` : sp;
+}
+function drawFal(models) {
+  const s = $("#falmodel"); if (s.children.length) return;
+  for (const [k, m] of Object.entries(models)) {
+    const b = document.createElement("button"); b.type = "button"; b.dataset.v = k;
+    b.innerHTML = `${m.label}<small>${m.price}</small>`; b.title = m.detail; s.append(b);
+  }
+}
+seg("#aspect", b => { W = +b.dataset.w; H = +b.dataset.h; });
+$("#dice").onclick = () => $("#seed").value = Math.floor(Math.random() * 2 ** 31);
+IDEAS.forEach(([k, p]) => { const c = document.createElement("button"); c.className = "chip"; c.type = "button"; c.textContent = k; c.onclick = () => $("#prompt").value = p; $("#ideas").append(c); });
+
+// Showcase "Use prompt" links land here as /?prompt=…
+const qp = new URLSearchParams(location.search).get("prompt");
+if (qp) $("#prompt").value = qp;
+
+pollInfo(i => {
+  falInfo = i.fal_models || {}; hasFal = !!i.has_fal; spend = i.fal_spend || null;
+  drawFal(falInfo); [...$("#falmodel").children].forEach(b => b.disabled = !hasFal); falHint();
+  enabled = new Set(i.enabled || ["klein"]);
+  for (const v of ["zimage", "both"]) $(`#model [data-v="${v}"]`).hidden = !enabled.has("zimage");
+  $("#zoff").hidden = enabled.has("zimage");
+  if (i.ready) $("#go").disabled = false;
+});
+
+function setCount() {
+  $("#gempty").hidden = total > 0;
+  $("#gcount").innerHTML = total ? `${total} image${total === 1 ? "" : "s"} · saved to <span class="mono">out/gallery/</span>` : `Saved to <span class="mono">out/gallery/</span>`;
+}
+
+function genCard(r, fresh) {
+  const src = "/media/gallery/" + r.file;
+  const cap = `${NAMES[r.model]}${r.seconds != null ? " · " + r.seconds + "s" : ""}${r.seed != null ? " · seed " + r.seed : ""} · ${r.prompt}`;
+  const el = document.createElement("div"); el.className = "gen" + (fresh ? " new" : "");
+  el.innerHTML = `<div class="ph"><img loading="lazy" alt=""><span class="tag ${FAL.has(r.model) ? "fal" : r.model}"></span></div>
+    <div class="body"><div class="pr"></div><div class="mt mono"></div>
+    <div class="acts"><button class="use" type="button" data-a="reuse">Reuse</button><button class="use" type="button" data-a="vary">New seed</button><button class="use" type="button" data-a="ref">+ Reference</button><a class="use" data-a="3d" style="text-decoration:none">3D human →</a><a class="use" data-a="obj" style="text-decoration:none">3D object →</a></div></div>`;
+  el.querySelector('[data-a="3d"]').href = "/3d?src=" + encodeURIComponent(r.file);
+  el.querySelector('[data-a="obj"]').href = "/objects?src=" + encodeURIComponent(r.file);
+  el.querySelector(".ph").style.aspectRatio = `${r.width} / ${r.height}`;
+  const img = el.querySelector("img"); img.src = src; img.alt = cap; img.onclick = () => lightbox(src, cap);
+  el.querySelector(".tag").textContent = NAMES[r.model];
+  el.querySelector(".pr").textContent = r.prompt; el.querySelector(".pr").title = r.prompt;
+  el.querySelector(".mt").textContent = r.cost_usd != null
+    ? `${r.seconds != null ? r.seconds + "s · " : ""}${r.width}×${r.height} · ${money(r.cost_usd)}${r.seed != null ? " · seed " + r.seed : ""}`
+    : `${r.seconds}s · ${r.width}×${r.height} · ${r.steps} steps · seed ${r.seed}`;
+  el.querySelector(".acts").onclick = e => {
+    const a = e.target.dataset.a; if (!a || a === "3d") return;
+    if (a === "ref") { refs.add({ ref: r.file, url: src, label: r.prompt, kind: "generation" }); $("#refs").scrollIntoView({ behavior: "smooth", block: "center" }); return; }
+    $("#prompt").value = r.prompt;
+    if (!FAL.has(r.model) || hasFal) setModel(r.model);
+    pick("#aspect", b => +b.dataset.w === r.width && +b.dataset.h === r.height);
+    $("#seed").value = a === "reuse" ? r.seed : "";
+    $("#steps").value = a === "reuse" ? r.steps : "";
+    $("#prompt").scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+  return el;
+}
+
+async function loadGens() {
+  const rows = await (await fetch("/api/history")).json();
+  const g = $("#gens"); g.innerHTML = "";
+  for (const r of rows) g.append(genCard(r, false));
+  total = rows.length; setCount();
+}
+
+let tick;
+async function run() {
+  const prompt = $("#prompt").value.trim(); if (!prompt) return;
+  const models = model === "both" ? ["klein", "zimage"] : [model];
+  const seed = $("#seed").value === "" ? Math.floor(Math.random() * 2 ** 31) : +$("#seed").value;
+  const steps = $("#steps").value === "" ? null : +$("#steps").value;
+  const refList = refs.items.map(i => i.ref);
+  if (refList.length && models.some(m => m === "zimage")) { $("#stxt").textContent = "Z-Image doesn't take references — use klein 4B or a cloud model"; return; }
+  if (FAL.has(model) && !hasFal) { $("#stxt").textContent = "No fal API key — see the hint under Cloud"; return; }
+  const canvas = $("#canvas"); canvas.className = "canvas" + (models.length > 1 ? " two" : ""); canvas.innerHTML = "";
+  const slots = models.map(m => { const s = document.createElement("div"); s.innerHTML = `<div class="slot"><div class="empty">Waiting · ${NAMES[m]}</div></div>`; canvas.append(s); return s; });
+  $("#go").disabled = true;
+  const t0 = performance.now();
+  tick = setInterval(async () => {
+    $("#timer").textContent = ((performance.now() - t0) / 1000).toFixed(1) + "s";
+    try { const p = await (await fetch("/api/progress")).json(); if (p.busy) { $("#bar").style.width = p.remote ? "50%" : (100 * p.step / p.steps) + "%"; $("#stxt").textContent = p.remote ? `${NAMES[p.model]} · ${p.remote} on fal…` : p.waiting ? "Waiting for the GPU (a 3D job is using it)…" : `${NAMES[p.model]} · step ${p.step}/${p.steps}`; } } catch (e) {}
+  }, 300);
+  try {
+    for (let i = 0; i < models.length; i++) {
+      const m = models[i];
+      slots[i].querySelector(".empty").textContent = `Rendering · ${NAMES[m]}…`;
+      const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: m, prompt, width: W, height: H, seed, steps, refs: refList }) });
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      const meta = await r.json();
+      const src = "/media/gallery/" + meta.file, cap = `${NAMES[m]} · ${meta.seconds}s · seed ${meta.seed} · ${prompt}`;
+      slots[i].innerHTML = meta.cost_usd != null
+        ? `<div class="slot"><img alt=""></div><div class="meta"><span class="tag fal">${NAMES[m]}</span><span><b>${meta.seconds}s</b> on fal</span><span>${meta.width}×${meta.height}</span><span><b>${money(meta.cost_usd)}</b> est.</span><span>seed ${meta.seed}</span></div>`
+        : `<div class="slot"><img alt=""></div><div class="meta"><span class="tag ${m}">${NAMES[m]}</span><span><b>${meta.seconds}s</b> server time</span><span>${meta.width}×${meta.height}</span><span>${meta.steps} steps</span><span>seed ${meta.seed}</span><span>${meta.peak_vram_gb} GB peak</span></div>`;
+      if (meta.cost_usd != null && spend) { spend.today += meta.cost_usd; spend.total += meta.cost_usd; falHint(); }
+      const img = slots[i].querySelector("img"); img.src = src; img.alt = cap; img.onclick = () => lightbox(src, cap);
+      document.querySelectorAll(".gen.new").forEach(x => x.classList.remove("new"));
+      $("#gens").prepend(genCard(meta, true)); total++; setCount();
+    }
+    $("#stxt").textContent = "Done";
+  } catch (e) { $("#stxt").textContent = "Error: " + e.message; }
+  clearInterval(tick); $("#bar").style.width = "100%"; $("#go").disabled = false;
+  $("#timer").textContent = ((performance.now() - t0) / 1000).toFixed(1) + "s total";
+}
+$("#go").onclick = run;
+$("#prompt").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run(); });
+
+loadGens();
+</script>
+</body>
+</html>

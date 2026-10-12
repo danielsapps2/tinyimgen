@@ -1,0 +1,8 @@
+{
+ "Idle": 0.55,
+ "Walk": 1.55,
+ "Run": 1.4,
+ "WalkBackward": 1.85,
+ "StrafeLeft": 2.65,
+ "StrafeRight": 2.65
+}

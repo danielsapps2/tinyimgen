@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinyImGen Prop Editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .pe { display: grid; grid-template-columns: 320px 1fr 1fr; gap: 0; overflow: hidden; }
+  .pe .panel { padding: 16px; display: flex; flex-direction: column; gap: 14px; border-right: 1px solid var(--line); max-height: calc(100vh - 150px); overflow-y: auto; }
+  .pe .view { position: relative; min-height: 560px; background: radial-gradient(ellipse at 50% 40%, var(--surface), var(--surface-2)); }
+  .pe .view + .view { border-left: 1px solid var(--line); }
+  .pe .view canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  .pe .vlabel { position: absolute; left: 12px; top: 10px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); pointer-events: none; }
+  .pe .vhint { position: absolute; left: 12px; bottom: 10px; right: 12px; font-size: 12.5px; color: var(--muted); pointer-events: none; }
+  .tools { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .tool { border: 1px solid var(--line); background: var(--surface-2); color: var(--text); border-radius: 9px; padding: 8px 6px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+  .tool.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+  .tool:disabled { opacity: .45; cursor: default; }
+  #histbar .btn2:disabled { opacity: .4; cursor: default; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+  .rowx { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .rowx input[type=range] { flex: 1; accent-color: var(--accent); }
+  .rowx input[type=number], .rowx select { font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); }
+  .rowx input[type=number] { width: 90px; }
+  .rowx select { flex: 1; min-width: 0; }
+  .status { font-size: 12.5px; color: var(--muted); min-height: 1.4em; }
+  .fingers { display: grid; grid-template-columns: 52px 1fr 34px; gap: 2px 8px; font-size: 12.5px; align-items: center; }
+  .fingers input { width: 100%; accent-color: var(--accent); }
+  @media (max-width: 1100px) { .pe { grid-template-columns: 1fr; } .pe .panel { max-height: none; border-right: 0; border-bottom: 1px solid var(--line); } .pe .view { min-height: 420px; } .pe .view + .view { border-left: 0; border-top: 1px solid var(--line); } }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div class="wrap" style="max-width:1600px">
+  <header>
+    <div class="left">
+      <div class="brand"><div class="logo">t</div>TinyImGen</div>
+      <nav class="tabs"><a href="/">Image Studio</a><a href="/3d">3D Humans</a><a href="/objects" class="on">3D Objects</a><a href="/explorer">Explorer</a><a href="/showcase">Showcase</a></nav>
+    </div>
+    <div class="pills"><button class="themebtn" id="theme" type="button">Theme</button></div>
+  </header>
+  <section style="margin-top:14px">
+    <div class="gh">
+      <h2>Prop Editor <span class="sub" id="ptitle" style="font-size:15px;font-weight:500"></span></h2>
+      <div class="rowx" id="histbar" style="margin-left:auto;gap:6px">
+        <button class="btn2" id="undo" type="button" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
+        <button class="btn2" id="redo" type="button" title="Redo (Ctrl+Shift+Z / Ctrl+Y)" disabled>↷ Redo</button>
+        <button class="btn2" id="revert" type="button" title="Back to the last saved grips (undoable)" hidden>Revert to saved</button>
+        <button class="btn2" id="reset" type="button" title="Start over: no grips, default hold and fingers (undoable)">Reset</button>
+      </div>
+      <select id="pickprop" aria-label="Prop" style="font:inherit;font-size:13.5px;padding:7px 10px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--text);max-width:320px"></select>
+    </div>
+    <p class="sub" style="margin:4px 0 12px">Mark where a hand holds this object and which way it points. A rigged human holds it live on the right. Saving writes the grips for games: <span class="mono">prop.glb</span> (Grip_Primary / Grip_Secondary nodes) and <span class="mono">grip.json</span>.</p>
+    <div class="card pe">
+      <div class="panel">
+        <div>
+          <label class="l">Hands</label>
+          <div class="seg" id="hands"><button data-v="1" class="on" type="button">One hand</button><button data-v="2" type="button">Two hands</button></div>
+        </div>
+        <div>
+          <label class="l">Hold</label>
+          <div class="seg" id="hold">
+            <button data-v="upright" class="on" type="button">Upright<small>swords, axes, tools</small></button>
+            <button data-v="forward" type="button">Forward<small>guns, wands</small></button>
+          </div>
+        </div>
+        <div>
+          <label class="l">Click on the prop to place</label>
+          <div class="tools" id="tools">
+            <button class="tool on" data-t="primary" type="button"><span class="dot" style="background:#ff6a33"></span>Grip</button>
+            <button class="tool" data-t="secondary" type="button"><span class="dot" style="background:#3b82f6"></span>2nd grip</button>
+            <button class="tool" data-t="tip" type="button"><span class="dot" style="background:#22c55e"></span>Tip</button>
+          </div>
+          <div class="hint">The grip snaps to the middle of the handle under your click. Tip: click where the prop points (blade tip, barrel, head).</div>
+        </div>
+        <div>
+          <label class="l">Direction</label>
+          <div class="rowx"><button class="btn2" id="autodir" type="button">Auto (long axis)</button><button class="btn2" id="flip" type="button">Flip</button></div>
+        </div>
+        <div>
+          <label class="l">Roll around the direction</label>
+          <div class="rowx"><input type="range" id="roll" min="-180" max="180" step="1" value="0"><span class="mono" id="rollv" style="width:44px">0°</span></div>
+        </div>
+        <div id="roll2row" hidden>
+          <label class="l">Second hand roll</label>
+          <div class="rowx"><input type="range" id="roll2" min="-180" max="180" step="1" value="0"><span class="mono" id="roll2v" style="width:44px">0°</span></div>
+        </div>
+        <div>
+          <label class="l">Size</label>
+          <div class="rowx"><span class="hint" style="margin:0">longest side</span><input type="number" id="length" min="0.02" max="20" step="0.01"><span class="hint" style="margin:0">m</span></div>
+          <div class="rowx" style="margin-top:6px"><input type="range" id="lenr" min="0" max="1" step="0.001" aria-label="Size" title="0.05 – 5 m"></div>
+          <div class="hint" style="margin:4px 0 0">Or in the preview: Gizmo → Scale (R), grab a handle and drag up / down. It scales around the handle.</div>
+        </div>
+        <div>
+          <label class="l">Preview</label>
+          <div class="rowx" style="margin-bottom:6px"><select id="human" aria-label="Character"></select></div>
+          <div class="rowx">
+            <select id="clip" aria-label="Animation"></select>
+            <div class="seg" id="hand" style="min-width:120px"><button data-v="Right" class="on" type="button">Right</button><button data-v="Left" type="button">Left</button></div>
+          </div>
+        </div>
+        <div>
+          <label class="l">Arms</label>
+          <div class="seg" id="arms"><button data-v="animated" class="on" type="button">Follow animation<small>prop swings with the hand</small></button><button data-v="static" type="button">Static pose<small>held in place</small></button></div>
+          <div class="rowx" style="margin-top:6px"><button class="btn2" id="toready" type="button">Reset to ready pose</button></div>
+        </div>
+        <div>
+          <label class="l">Drag in the preview</label>
+          <div class="seg" id="gizmo"><button data-v="off" class="on" type="button">Off</button><button data-v="grip" type="button">Grip in hand</button><button data-v="carry" type="button">Carry pose</button></div>
+          <div class="seg" id="gmode" style="margin-top:6px"><button data-v="translate" class="on" type="button">Move <small>W</small></button><button data-v="rotate" type="button">Rotate <small>E</small></button><button data-v="scale" type="button">Scale <small>R</small></button></div>
+          <div class="hint" id="gizmohint">Grip in hand: drag the prop to sit it right in the fist (edits the grip). Carry pose: place the held prop anywhere, arms follow (static pose).</div>
+        </div>
+        <div>
+          <label class="l">Fingers · main hand</label>
+          <div class="fingers" id="fingers1"></div>
+          <div class="rowx" style="margin-top:6px"><button class="btn2" data-wrap="primary" type="button">Auto wrap</button><button class="btn2" data-preset="primary:0" type="button">Open</button><button class="btn2" data-preset="primary:0.3" type="button">Relaxed</button><button class="btn2" data-preset="primary:1" type="button">Fist</button></div>
+        </div>
+        <div id="fingers2row" hidden>
+          <label class="l">Fingers · second hand</label>
+          <div class="fingers" id="fingers2"></div>
+          <div class="rowx" style="margin-top:6px"><button class="btn2" data-wrap="secondary" type="button">Auto wrap</button><button class="btn2" data-preset="secondary:0" type="button">Open</button><button class="btn2" data-preset="secondary:0.3" type="button">Relaxed</button><button class="btn2" data-preset="secondary:1" type="button">Fist</button></div>
+        </div>
+        <button class="go" id="save" type="button">Save grips</button>
+        <div class="status" id="status"></div>
+        <div class="rowx" id="dl"></div>
+      </div>
+      <div class="view" id="propview"><span class="vlabel">Prop · drag to orbit, click to place</span><div class="vhint" id="phint"></div></div>
+      <div class="view" id="humanview"><span class="vlabel">In hand</span>
+        <div style="position:absolute;right:10px;top:8px;display:flex;gap:6px;z-index:2"><button class="btn2" id="focushand" type="button">Focus hand</button><button class="btn2" id="focusbody" type="button">Whole body</button></div>
+        <div class="vhint" id="hhint"></div></div>
+    </div>
+  </section>
+</div>
+
+<script>
+// theme toggle (same as the other pages)
+const THEMES = ["system", "light", "dark"]; let themeIdx = 0;
+try { themeIdx = Math.max(0, THEMES.indexOf(localStorage.getItem("theme") || "system")); } catch (e) {}
+function applyTheme() { const m = THEMES[themeIdx]; if (m === "system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.dataset.theme = m; document.getElementById("theme").textContent = "Theme: " + m; }
+document.getElementById("theme").onclick = () => { themeIdx = (themeIdx + 1) % 3; try { localStorage.setItem("theme", THEMES[themeIdx]); } catch (e) {} applyTheme(); window.dispatchEvent(new Event("themechange")); };
+applyTheme();
+</script>
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { TransformControls } from "three/addons/controls/TransformControls.js";
+import { attachProp, updateHold, readyPose, solveSupportHand, detachProp, setFingers, autoWrap, carryPose, FINGERS, curlValue, CARRY_BONE } from "/static/props.js";
+
+const $ = s => document.querySelector(s);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const loader = new GLTFLoader();
+const RELAX = 0.3;
+const st = { hands: 1, hold: "upright", tool: "primary", p1: null, p2: null, dir: new THREE.Vector3(0, 1, 0), roll: 0, roll2: 0, scale: 1, hand: "Right", dirty: false,
+             arms: "animated", carry: null, wantReady: false, gizmo: "off",
+             fingers: { primary: Object.fromEntries(FINGERS.map(f => [f, RELAX])), secondary: Object.fromEntries(FINGERS.map(f => [f, RELAX])) } };
+let jobId = new URLSearchParams(location.search).get("id");
+
+// ---------- two viewports ----------
+function makeView(el, fov = 40) {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.outputColorSpace = THREE.SRGBColorSpace;
+  el.prepend(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8478, 1.8));
+  const sun = new THREE.DirectionalLight(0xffffff, 2.0); sun.position.set(2, 4, 3); scene.add(sun);
+  const camera = new THREE.PerspectiveCamera(fov, 1, 0.01, 200);
+  const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true;
+  const resize = () => { const r = el.getBoundingClientRect(); renderer.setSize(r.width, r.height, false); camera.aspect = r.width / Math.max(1, r.height); camera.updateProjectionMatrix(); };
+  new ResizeObserver(resize).observe(el); resize();
+  return { renderer, scene, camera, controls, el };
+}
+const PV = makeView($("#propview")), HV = makeView($("#humanview"), 35);
+const grid = new THREE.GridHelper(6, 24); grid.material.transparent = true; grid.material.opacity = 0.35; HV.scene.add(grid);
+
+// ---------- prop view: model, markers, picking ----------
+let propModel = null, propMeshes = [], propSize = 1, propBox = null, verts = null;
+const mk = color => { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshBasicMaterial({ color, depthTest: false })); m.renderOrder = 10; m.visible = false; PV.scene.add(m); return m; };
+const m1 = mk(0xff6a33), m2 = mk(0x3b82f6), mt = mk(0x22c55e);
+const arrowDir = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(), 1, 0x22c55e);
+const arrowRef = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(), 0.5, 0xffcc33);
+for (const a of [arrowDir, arrowRef]) { a.visible = false; a.traverse(o => { if (o.material) { o.material.depthTest = false; o.renderOrder = 11; } }); PV.scene.add(a); }
+
+async function loadProp(id) {
+  const r = await (await fetch("/api/props/" + id)).json();
+  if (!r.job) throw new Error("no such object");
+  const j = r.job;
+  $("#ptitle").textContent = "· " + (j.title || j.config?.describe || id);
+  if (propModel) PV.scene.remove(propModel);
+  const gltf = await loader.loadAsync(`/media/3d/${id}/${j.outputs.game}?v=${j.elapsed || 0}`);
+  propModel = gltf.scene; propMeshes = [];
+  propModel.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.side = THREE.DoubleSide; propMeshes.push(o); } });
+  PV.scene.add(propModel);
+  propModel.updateMatrixWorld(true);
+  propBox = new THREE.Box3().setFromObject(propModel);
+  const size = propBox.getSize(new THREE.Vector3()); propSize = Math.max(size.x, size.y, size.z);
+  verts = [];   // for the long-axis fit
+  propModel.traverse(o => { if (o.isMesh) { const p = o.geometry.attributes.position; const step = Math.max(1, Math.floor(p.count / 4000));
+    for (let i = 0; i < p.count; i += step) verts.push(new THREE.Vector3().fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld)); } });
+  const c = propBox.getCenter(new THREE.Vector3());
+  PV.controls.target.copy(c); PV.camera.position.copy(c).add(new THREE.Vector3(0.9, 0.5, 1.3).multiplyScalar(propSize * 1.1));
+  PV.camera.near = propSize / 200; PV.camera.far = propSize * 50; PV.camera.updateProjectionMatrix();
+  for (const m of [m1, m2, mt]) m.scale.setScalar(propSize * 0.018);
+  // saved grips, or fresh defaults
+  const g = r.grip;
+  st.touchedDir = !!g;
+  if (g) {
+    st.hands = g.hands; st.hold = g.hold; st.scale = g.scale; st.roll = g.roll_deg || 0; st.roll2 = g.secondary_roll_deg || 0; st.hand = g.hand === "left" ? "Left" : "Right";
+    st.dir.fromArray(g.direction).normalize();
+    st.p1 = g.points_model?.primary ? new THREE.Vector3().fromArray(g.points_model.primary) : null;
+    st.p2 = g.points_model?.secondary ? new THREE.Vector3().fromArray(g.points_model.secondary) : null;
+    for (const k of ["primary", "secondary"]) st.fingers[k] = { ...Object.fromEntries(FINGERS.map(f => [f, RELAX])), ...(g.fingers?.[k] || {}) };
+    st.carry = g.carry || null; st.arms = g.arms === "static" && g.carry ? "static" : "animated";
+  } else resetState();
+  syncUI(); refresh(); st.dirty = false; setStatus(g ? "Loaded the saved grips." : "Click on the handle to place the grip.");
+  hist.reset(!!g);
+  $("#dl").innerHTML = "";
+  if (j.outputs.prop) showDownloads(id);
+}
+
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let downAt = null;
+PV.renderer.domElement.addEventListener("pointerdown", e => downAt = [e.clientX, e.clientY]);
+PV.renderer.domElement.addEventListener("pointerup", e => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4 || !propModel) return;   // a drag orbits
+  const r = PV.renderer.domElement.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, PV.camera);
+  const hits = ray.intersectObjects(propMeshes, false);
+  if (!hits.length) return;
+  let p = hits[0].point.clone();
+  if (st.tool !== "tip") {   // the middle of the handle: halfway to where the ray leaves the part it entered
+    const exit = hits.find(h => h.distance > hits[0].distance + propSize * 0.002);
+    if (exit && exit.distance - hits[0].distance < propSize * 0.25) p = hits[0].point.clone().lerp(exit.point, 0.5);
+  }
+  if (st.tool === "primary") { st.p1 = p; if (!st.touchedDir) autoDirection(); }
+  else if (st.tool === "secondary") st.p2 = p;
+  else if (st.tool === "tip" && st.p1) { st.dir.copy(p).sub(st.p1).normalize(); st.touchedDir = true; mt.position.copy(p); mt.visible = true; }
+  st.dirty = true; refresh();
+});
+
+function autoDirection() {   // the long axis (PCA) of the prop, pointing from the grip toward its far end
+  if (!verts?.length) return;
+  const c = new THREE.Vector3(); verts.forEach(v => c.add(v)); c.multiplyScalar(1 / verts.length);
+  let ax = new THREE.Vector3(1, 1, 1).normalize();
+  const cov = (v) => { const out = new THREE.Vector3(); for (const p of verts) { const d = p.clone().sub(c); out.addScaledVector(d, d.dot(v)); } return out; };
+  for (let i = 0; i < 30; i++) ax = cov(ax).normalize();   // power iteration
+  const from = st.p1 || c;
+  let lo = Infinity, hi = -Infinity; for (const p of verts) { const t = p.clone().sub(from).dot(ax); lo = Math.min(lo, t); hi = Math.max(hi, t); }
+  st.dir.copy(hi >= -lo ? ax : ax.negate()).normalize();
+}
+
+// grip frame in the model's space: upright holds point along +Y of the hand socket, forward holds along +Z
+function gripQuaternion(extraRoll = 0) {
+  const d = st.dir.clone().normalize();
+  const fixed = st.hold === "upright" ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+  let ref = fixed.clone().sub(d.clone().multiplyScalar(fixed.dot(d)));
+  if (ref.lengthSq() < 1e-6) ref = new THREE.Vector3(1, 0, 0).sub(d.clone().multiplyScalar(d.x));
+  ref.normalize().applyAxisAngle(d, THREE.MathUtils.degToRad(st.roll + extraRoll));
+  let X, Y, Z;
+  if (st.hold === "upright") { Y = d; Z = ref; } else { Z = d; Y = ref; }
+  X = new THREE.Vector3().crossVectors(Y, Z).normalize();
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
+}
+
+function refresh() {
+  m1.visible = !!st.p1; if (st.p1) m1.position.copy(st.p1);
+  m2.visible = st.hands === 2 && !!st.p2; if (st.p2) m2.position.copy(st.p2);
+  arrowDir.visible = arrowRef.visible = !!st.p1;
+  if (st.p1) {
+    arrowDir.position.copy(st.p1); arrowDir.setDirection(st.dir.clone().normalize()); arrowDir.setLength(propSize * 0.35, propSize * 0.06, propSize * 0.035);
+    const refAxis = (st.hold === "upright" ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0)).applyQuaternion(gripQuaternion());
+    arrowRef.position.copy(st.p1); arrowRef.setDirection(refAxis); arrowRef.setLength(propSize * 0.15, propSize * 0.04, propSize * 0.025);
+  }
+  $("#phint").textContent = !st.p1 ? "Click the handle where the main hand grips it." :
+    st.hands === 2 && !st.p2 ? "Now choose “2nd grip” and click where the other hand holds it." :
+    "Green arrow: where the prop points · yellow: its front edge / top (roll).";
+  syncSize();
+  rebuildHeld();
+}
+
+// ---------- the human holding it ----------
+let human = null, mixer = null, held = null, heldModel = null, humanClips = [];
+async function loadHuman(id) {
+  if (human) { tc.detach(); HV.scene.add(carryProxy); HV.scene.remove(human); human = null; held = null; }
+  const j = await (await fetch("/api/3d/" + id)).json();
+  const gltf = await loader.loadAsync(`/media/3d/${id}/${j.outputs.rigged}?v=${j.rig?.stamp || j.elapsed || 0}`);
+  human = gltf.scene; human.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
+  HV.scene.add(human);
+  mixer = new THREE.AnimationMixer(human); humanClips = gltf.animations;
+  bindHips = human.getObjectByName("Hips")?.position.clone() || new THREE.Vector3();
+  const sel = $("#clip"); const keep = sel.value || "Idle"; sel.innerHTML = "";
+  sel.append(new Option("Bind pose (no animation)", "__bind"));
+  for (const c of humanClips) sel.append(new Option(c.name, c.name));
+  sel.value = keep === "__bind" || humanClips.some(c => c.name === keep) ? keep : "Idle";
+  playClip();
+  const h = new THREE.Box3().setFromObject(human).getSize(new THREE.Vector3()).y;
+  human.userData.height = h;
+  (human.getObjectByName(CARRY_BONE) || human).add(carryProxy);
+  HV.controls.target.set(0, h * 0.55, 0); HV.camera.position.set(h * 0.9, h * 0.8, h * 1.5);
+  rebuildHeld();
+}
+function playClip() {
+  if (!mixer) return;
+  mixer.stopAllAction();
+  if ($("#clip").value === "__bind") { human.traverse(o => { if (o.isBone) o.quaternion.identity(); }); human.getObjectByName("Hips")?.position.copy(bindHips); return; }
+  const c = humanClips.find(c => c.name === $("#clip").value); if (c) mixer.clipAction(c).play();
+}
+let bindHips = new THREE.Vector3();
+
+function rebuildHeld() {
+  if (held) { detachProp(held); held = null; }
+  if (!human || !propModel || !st.p1) { $("#hhint").textContent = human ? "Place the grip on the prop to see it in hand." : ""; return; }
+  // the same structure prop.glb has: Prop -> Model (scaled) + Grip nodes
+  const root = new THREE.Group(); root.name = "Prop";
+  const model = propModel.clone(true); model.name = "Model"; model.scale.setScalar(st.scale);
+  model.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.side = THREE.FrontSide; } });
+  root.add(model);
+  const g1 = new THREE.Object3D(); g1.name = "Grip_Primary"; g1.position.copy(st.p1).multiplyScalar(st.scale); g1.quaternion.copy(gripQuaternion()); root.add(g1);
+  if (st.hands === 2 && st.p2) { const g2 = new THREE.Object3D(); g2.name = "Grip_Secondary"; g2.position.copy(st.p2).multiplyScalar(st.scale); g2.quaternion.copy(gripQuaternion(st.roll2)); root.add(g2); }
+  held = attachProp(human, root, { hand: st.hand });
+  attachGizmo();
+  $("#hhint").textContent = st.hands === 2 && !st.p2 ? "Two hands: place the 2nd grip." : "Drag to orbit · the support hand reaches the 2nd grip.";
+}
+
+// ---------- UI ----------
+function seg(id, cb) { $(id).addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; [...$(id).children].forEach(x => x.classList.toggle("on", x === b)); cb(b.dataset.v); }); }
+seg("#hands", v => { st.hands = +v; if (st.hands === 2 && st.arms !== "static") { st.arms = "static"; if (!st.carry) st.wantReady = true; } st.dirty = true; syncUI(); refresh(); });
+seg("#hold", v => { st.hold = v; st.dirty = true; refresh(); });
+seg("#hand", v => { st.hand = v; refresh(); });
+$("#tools").addEventListener("click", e => { const b = e.target.closest(".tool"); if (!b || b.disabled) return; st.tool = b.dataset.t; [...$("#tools").children].forEach(x => x.classList.toggle("on", x === b)); });
+$("#autodir").onclick = () => { autoDirection(); st.touchedDir = true; st.dirty = true; refresh(); };
+$("#flip").onclick = () => { st.dir.negate(); st.dirty = true; refresh(); };
+$("#roll").oninput = () => { st.roll = +$("#roll").value; $("#rollv").textContent = st.roll + "°"; st.dirty = true; refresh(); };
+$("#roll2").oninput = () => { st.roll2 = +$("#roll2").value; $("#roll2v").textContent = st.roll2 + "°"; st.dirty = true; refresh(); };
+$("#length").onchange = () => { const L = +$("#length").value; if (L > 0) { st.scale = L / propSize; st.dirty = true; refresh(); } };
+// the size slider is logarithmic, 0.05 .. 5 m
+const LEN_MIN = 0.05, LEN_MAX = 5;
+function syncSize() {
+  const L = propSize * st.scale;
+  if (document.activeElement !== $("#length")) $("#length").value = L.toFixed(2);
+  $("#lenr").value = Math.log(THREE.MathUtils.clamp(L, LEN_MIN, LEN_MAX) / LEN_MIN) / Math.log(LEN_MAX / LEN_MIN);
+}
+$("#lenr").oninput = () => {
+  const L = LEN_MIN * Math.pow(LEN_MAX / LEN_MIN, +$("#lenr").value);
+  st.dirty = true;
+  if (held && st.p1) { liveScale(L / propSize); if (st.arms === "static" && st.gizmo === "carry") placeCarryProxy(); }
+  else { st.scale = L / propSize; syncSize(); }
+};
+$("#lenr").onchange = () => refresh();
+$("#clip").onchange = playClip;
+
+$("#human").onchange = () => loadHuman($("#human").value);
+$("#pickprop").onchange = () => { if (st.dirty && !confirm("Discard unsaved grip changes?")) { $("#pickprop").value = jobId; return; } jobId = $("#pickprop").value; history.replaceState(null, "", "/prop-editor?id=" + jobId); loadProp(jobId); };
+// ---------- gizmo: move the grip in the hand, or the static carry pose ----------
+const tc = new TransformControls(HV.camera, HV.renderer.domElement);
+HV.scene.add(tc.getHelper ? tc.getHelper() : tc);
+tc.setSize(0.8);
+// the gizmo sits on the handle (the primary grip), not on the model's origin (often the tip or the middle):
+// carryProxy is the grip's pose in the chest's space, gripProxy the grip's pose in the hand socket's space
+const carryProxy = new THREE.Object3D(); HV.scene.add(carryProxy);   // re-parented to the chest when a human loads
+const gripProxy = new THREE.Object3D();
+const _m4 = new THREE.Matrix4();
+let dragging = false;
+// Scale: grab any scale handle and drag up (bigger) or down (smaller); x2 per 200 px. (The gizmo's own ratio
+// from its centre explodes when grabbed near the middle.) The prop scales around the handle.
+let scaleStart = 1, scaleY0 = null, pointerY = 0;
+HV.renderer.domElement.addEventListener("pointermove", e => { pointerY = e.clientY; });
+HV.renderer.domElement.addEventListener("pointerdown", e => { pointerY = e.clientY; }, true);
+tc.addEventListener("dragging-changed", e => {
+  dragging = e.value; HV.controls.enabled = !e.value;
+  if (tc.mode === "scale") {   // scaling resizes the prop around the handle; the proxies stay unscaled
+    if (e.value) { scaleStart = st.scale; scaleY0 = pointerY; }
+    else { gripProxy.scale.set(1, 1, 1); carryProxy.scale.set(1, 1, 1); st.dirty = true; refresh(); }
+    return;
+  }
+  if (!e.value && st.gizmo === "grip") commitGripDrag();
+  if (!e.value && st.gizmo === "carry" && held) { captureCarry(); placeCarryProxy(); }   // settle where the hand holds it
+});
+// the prop's size, live (without rebuilding it): the model scales, the grips move with it, the hand stays on Grip_Primary
+function liveScale(scale) {   // (the static carry places the hand, so it doesn't change)
+  st.scale = scale;
+  held.root.getObjectByName("Model").scale.setScalar(scale);
+  held.grip.position.copy(st.p1).multiplyScalar(scale);
+  if (held.secondary && st.p2) held.secondary.position.copy(st.p2).multiplyScalar(scale);
+  updateHold(held);
+  syncSize();
+}
+tc.addEventListener("objectChange", () => {
+  if (tc.mode === "scale") {
+    if (!held || !tc.object) return;
+    tc.object.scale.set(1, 1, 1);
+    const f = Math.pow(2, (scaleY0 - pointerY) / 200);
+    liveScale(THREE.MathUtils.clamp(scaleStart * f, 0.01, 100));
+    st.dirty = true;
+    return;
+  }
+  if (st.gizmo === "carry") { carryFromProxy(); st.dirty = true; }
+  else if (st.gizmo === "grip" && held) {   // the prop follows the handle: root = holder^-1 * proxy * grip^-1
+    held.holder.updateMatrix(); held.grip.updateMatrix(); gripProxy.updateMatrix();
+    _m4.copy(held.holder.matrix).invert().multiply(gripProxy.matrix).multiply(held.grip.matrix.clone().invert())
+      .decompose(held.root.position, held.root.quaternion, held.root.scale);
+  }
+});
+function attachGizmo() {
+  tc.detach();
+  if (st.gizmo === "grip" && held) {   // at the handle, i.e. where the grip sits in the hand
+    held.socket.add(gripProxy);
+    held.holder.updateMatrix(); held.root.updateMatrix(); held.grip.updateMatrix();
+    _m4.copy(held.holder.matrix).multiply(held.root.matrix).multiply(held.grip.matrix)
+      .decompose(gripProxy.position, gripProxy.quaternion, gripProxy.scale);
+    tc.attach(gripProxy);
+  }
+  else if (st.gizmo === "carry" && held && st.arms === "static") { placeCarryProxy(); tc.attach(carryProxy); }
+}
+// the carry pose lives in the chest bone's space, in character heights (props.js carryPose)
+function carryFromProxy() {   // proxy (the grip) -> the Prop root's carry pose
+  const h = human.userData.height, p = new THREE.Vector3(), q = new THREE.Quaternion();
+  p.copy(carryProxy.position); q.copy(carryProxy.quaternion);
+  st.carry = { position: p.multiplyScalar(1 / h).toArray(), rotation: q.toArray(), of: "grip" };
+}
+function placeCarryProxy() {   // on the handle where the prop actually is (a carry past arm's reach is pulled in)
+  if (!st.carry || !held) return;
+  held.grip.updateMatrixWorld(true);
+  const chest = human.getObjectByName(CARRY_BONE) || human;
+  chest.matrixWorld.clone().invert().multiply(held.grip.matrixWorld).decompose(carryProxy.position, carryProxy.quaternion, carryProxy.scale);
+  carryProxy.scale.set(1, 1, 1);
+}
+function captureCarry() {   // the hand's current place (e.g. after the ready pose) becomes the carry pose
+  held.grip.updateMatrixWorld(true);
+  const chest = human.getObjectByName(CARRY_BONE) || human;
+  const m = chest.matrixWorld.clone().invert().multiply(held.grip.matrixWorld);
+  const p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+  m.decompose(p, q, sc);
+  const h = human.userData.height;
+  st.carry = { position: p.multiplyScalar(1 / h).toArray(), rotation: q.toArray(), of: "grip" };
+}
+// grips saved before carry poses were hand-relative stored the Prop root's place: convert once (not an edit)
+function upgradeCarry() {
+  if (!st.carry || st.carry.of === "grip" || !held || !human) return;
+  const before = snap(), h = human.userData.height;
+  held.grip.updateMatrix();
+  const p = new THREE.Vector3(), q = new THREE.Quaternion();
+  new THREE.Matrix4().compose(new THREE.Vector3().fromArray(st.carry.position).multiplyScalar(h), new THREE.Quaternion().fromArray(st.carry.rotation),
+    new THREE.Vector3(1, 1, 1)).multiply(held.grip.matrix).decompose(p, q, new THREE.Vector3());
+  st.carry = { position: p.multiplyScalar(1 / h).toArray(), rotation: q.toArray(), of: "grip" };
+  const after = snap();
+  hist.stack = hist.stack.map(x => x === before ? after : x);
+  if (hist.saved === before) hist.saved = after;
+  if (hist.seen === before) hist.seen = after;
+}
+// the prop was dragged relative to the hand: that drag is a new grip (position, direction, roll)
+function commitGripDrag() {
+  held.holder.updateMatrix(); held.root.updateMatrix();
+  const G = held.holder.matrix.clone().multiply(held.root.matrix).invert();
+  const p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+  G.decompose(p, q, sc);
+  st.p1 = p.multiplyScalar(1 / st.scale);
+  setGripFromQuaternion(q);
+  st.dirty = true; syncUI(); refresh();
+}
+function setGripFromQuaternion(q) {   // inverse of gripQuaternion: direction + roll
+  const point = st.hold === "upright" ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);
+  const refAx = st.hold === "upright" ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+  const d = point.applyQuaternion(q).normalize(), actual = refAx.applyQuaternion(q).normalize();
+  st.dir.copy(d);
+  const save = st.roll; st.roll = 0;
+  const base = (st.hold === "upright" ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0)).applyQuaternion(gripQuaternion());
+  st.roll = Math.round(THREE.MathUtils.radToDeg(Math.atan2(new THREE.Vector3().crossVectors(base, actual).dot(d), base.dot(actual))));
+  if (!Number.isFinite(st.roll)) st.roll = save;
+  st.touchedDir = true;
+}
+seg("#gizmo", v => { st.gizmo = v; if (v === "carry" && st.arms !== "static") { st.arms = "static"; if (!st.carry) st.wantReady = true; syncUI(); } attachGizmo(); });
+seg("#gmode", v => tc.setMode(v));
+seg("#arms", v => { st.arms = v; if (v === "static" && !st.carry) st.wantReady = true; if (v !== "static" && st.gizmo === "carry") { st.gizmo = "off"; } st.dirty = true; syncUI(); attachGizmo(); });
+$("#toready").onclick = () => { st.arms = "static"; st.wantReady = true; st.dirty = true; syncUI(); setTimeout(attachGizmo, 50); };
+addEventListener("keydown", e => { if (e.target.matches("input, select, textarea")) return; if (e.key === "w") $("#gmode [data-v=translate]").click(); if (e.key === "e") $("#gmode [data-v=rotate]").click(); if (e.key === "r") $("#gmode [data-v=scale]").click(); });
+
+// ---------- camera: whole body or close on the holding hand ----------
+let follow = null;
+$("#focushand").onclick = () => { follow = "hand"; };
+$("#focusbody").onclick = () => { follow = null; const h = human?.userData.height || 1.8; HV.controls.target.set(0, h * 0.55, 0); HV.camera.position.set(h * 0.9, h * 0.8, h * 1.5); };
+function followHand() {
+  if (follow !== "hand" || !human) return;
+  const s = human.getObjectByName(st.hand + "Hand_Socket") || human.getObjectByName(st.hand + "Hand");
+  const p = s.getWorldPosition(new THREE.Vector3());
+  const off = HV.camera.position.clone().sub(HV.controls.target);
+  if (off.length() > 0.8) off.setLength(0.45);
+  HV.controls.target.copy(p); HV.camera.position.copy(p).add(off);
+}
+
+// ---------- fingers ----------
+function drawFingers() {
+  for (const [k, box] of [["primary", "#fingers1"], ["secondary", "#fingers2"]]) {
+    const el = $(box); el.innerHTML = "";
+    for (const f of FINGERS) {
+      const cur = curlValue(st.fingers[k][f]);
+      const inp = Object.assign(document.createElement("input"), { type: "range", min: 0, max: 1, step: 0.01, value: cur });
+      const val = document.createElement("span"); val.className = "mono"; val.textContent = Math.round(cur * 100) + "%";
+      inp.oninput = () => { st.fingers[k][f] = +inp.value; val.textContent = Math.round(inp.value * 100) + "%"; st.dirty = true; };
+      const name = document.createElement("span"); name.textContent = f;
+      el.append(name, inp, val);
+    }
+  }
+}
+document.addEventListener("click", e => {
+  const pre = e.target.closest("[data-preset]"), wrap = e.target.closest("[data-wrap]");
+  if (pre) { const [k, v] = pre.dataset.preset.split(":"); for (const f of FINGERS) st.fingers[k][f] = +v; st.dirty = true; drawFingers(); }
+  if (wrap && held && human) {
+    const k = wrap.dataset.wrap, side = k === "primary" ? st.hand : (st.hand === "Right" ? "Left" : "Right");
+    st.fingers[k] = autoWrap(human, side, held.root); st.dirty = true; drawFingers();
+    setStatus(`Auto wrap: ${FINGERS.map(f => f + " " + Math.round(curlValue(st.fingers[k][f]) * 100) + "%").join(" · ")}`);
+  }
+});
+
+// ---------- undo / redo / reset ----------
+// Every edit is one step: the editor state is snapshotted once it settles (a slider or gizmo drag is one step).
+function resetState() {
+  Object.assign(st, { hands: 1, hold: "upright", p1: null, p2: null, roll: 0, roll2: 0, scale: 1, hand: "Right", carry: null,
+                      arms: "animated", wantReady: false, touchedDir: false });
+  for (const k of ["primary", "secondary"]) st.fingers[k] = Object.fromEntries(FINGERS.map(f => [f, RELAX]));
+  st.dir.set(0, 1, 0);
+}
+const snap = () => JSON.stringify({ hands: st.hands, hold: st.hold, p1: st.p1, p2: st.p2, dir: st.dir, roll: st.roll, roll2: st.roll2,
+  scale: st.scale, hand: st.hand, arms: st.arms, carry: st.carry, fingers: st.fingers, touchedDir: !!st.touchedDir });
+function restore(json) {
+  const o = JSON.parse(json), v = x => x ? new THREE.Vector3(x.x, x.y, x.z) : null;
+  Object.assign(st, { hands: o.hands, hold: o.hold, p1: v(o.p1), p2: v(o.p2), roll: o.roll, roll2: o.roll2, scale: o.scale, hand: o.hand,
+                      arms: o.arms, carry: o.carry, fingers: o.fingers, touchedDir: o.touchedDir, wantReady: o.arms === "static" && !o.carry });
+  st.dir.copy(v(o.dir));
+  if (st.gizmo === "carry" && st.arms !== "static") st.gizmo = "off";
+  syncUI(); refresh();
+  st.dirty = json !== hist.saved;
+}
+const hist = {
+  stack: [], pos: -1, saved: null, seen: null, since: 0, held: false,
+  reset(hasSaved) { this.stack = [snap()]; this.pos = 0; this.seen = this.stack[0]; this.saved = this.stack[0]; $("#revert").hidden = !hasSaved; this.ui(); },
+  ui() { $("#undo").disabled = this.pos <= 0; $("#redo").disabled = this.pos >= this.stack.length - 1; },
+  tick() {   // record the state once it has settled and nothing is being dragged
+    if (this.pos < 0 || dragging || this.held) return;
+    const s = snap();
+    if (s === this.stack[this.pos]) { this.seen = s; return; }
+    if (s !== this.seen) { this.seen = s; this.since = performance.now(); return; }
+    if (performance.now() - this.since < 250) return;
+    this.stack.splice(this.pos + 1); this.stack.push(s);
+    if (this.stack.length > 200) this.stack.shift();
+    this.pos = this.stack.length - 1; this.ui();
+  },
+  go(d) {
+    this.tick(); this.since = 0;
+    const s = snap(); if (s !== this.stack[this.pos]) { this.stack.splice(this.pos + 1); this.stack.push(s); this.pos = this.stack.length - 1; }
+    const to = this.pos + d;
+    if (to < 0 || to >= this.stack.length) return;
+    this.pos = to; restore(this.stack[to]); this.seen = this.stack[to]; this.ui();
+    setStatus(d < 0 ? "Undone." : "Redone.");
+  },
+  jump(state, msg) {   // reset / revert: a normal, undoable step
+    this.tick(); restore(state); setStatus(msg);
+  },
+};
+addEventListener("pointerdown", () => { hist.held = true; });
+addEventListener("pointerup", () => { hist.held = false; });
+addEventListener("pointercancel", () => { hist.held = false; });
+setInterval(() => hist.tick(), 100);
+$("#undo").onclick = () => hist.go(-1);
+$("#redo").onclick = () => hist.go(1);
+$("#reset").onclick = () => { const keep = snap(); resetState(); const fresh = snap(); restore(keep); hist.jump(fresh, "Reset: place the grip again (Undo brings the old one back)."); };
+$("#revert").onclick = () => hist.jump(hist.saved, "Back to the saved grips.");
+addEventListener("keydown", e => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  if (e.target.matches("textarea, select, input:not([type=range])")) return;
+  const k = e.key.toLowerCase();
+  if (k === "z" && !e.shiftKey) { e.preventDefault(); hist.go(-1); }
+  else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); hist.go(1); }
+});
+
+function syncUI() {
+  for (const [id, v] of [["#hands", String(st.hands)], ["#hold", st.hold], ["#hand", st.hand]]) [...$(id).children].forEach(x => x.classList.toggle("on", x.dataset.v === v));
+  $("#roll").value = st.roll; $("#rollv").textContent = st.roll + "°"; $("#roll2").value = st.roll2; $("#roll2v").textContent = st.roll2 + "°";
+  $("#roll2row").hidden = st.hands !== 2;
+  $("#fingers2row").hidden = st.hands !== 2;
+  for (const [id, v] of [["#arms", st.arms], ["#gizmo", st.gizmo]]) [...$(id).children].forEach(x => x.classList.toggle("on", x.dataset.v === v));
+  drawFingers();
+  $("#tools [data-t=secondary]").disabled = st.hands !== 2;
+  if (st.hands !== 2 && st.tool === "secondary") $("#tools [data-t=primary]").click();
+}
+function setStatus(t) { $("#status").textContent = t; }
+function showDownloads(id) {
+  $("#dl").innerHTML = "";
+  for (const [label, f] of [["Prop GLB", "prop.glb"], ["Grip JSON", "grip.json"]]) { const a = document.createElement("a"); a.className = "btn2"; a.textContent = label; a.href = `/media/3d/${id}/${f}?v=${Date.now()}`; a.download = `${id}_${f}`; $("#dl").append(a); }
+}
+$("#save").onclick = async () => {
+  if (!st.p1) { setStatus("Place the grip first."); return; }
+  if (st.hands === 2 && !st.p2) { setStatus("Two hands: place the 2nd grip, or switch to one hand."); return; }
+  const q1 = gripQuaternion(), q2 = gripQuaternion(st.roll2);
+  const body = { hands: st.hands, hold: st.hold, scale: st.scale, hand: st.hand.toLowerCase(),
+    primary: { position: st.p1.clone().multiplyScalar(st.scale).toArray(), rotation: q1.toArray() },
+    secondary: st.hands === 2 ? { position: st.p2.clone().multiplyScalar(st.scale).toArray(), rotation: q2.toArray() } : null,
+    direction: st.dir.toArray(), roll_deg: st.roll, secondary_roll_deg: st.roll2,
+    points_model: { primary: st.p1.toArray(), ...(st.hands === 2 ? { secondary: st.p2.toArray() } : {}) }, length_m: propSize * st.scale,
+    fingers: { primary: st.fingers.primary, ...(st.hands === 2 ? { secondary: st.fingers.secondary } : {}) },
+    arms: st.arms, carry: st.arms === "static" ? st.carry : null };
+  $("#save").disabled = true; setStatus("Saving…");
+  const r = await fetch("/api/props/" + jobId, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  $("#save").disabled = false;
+  if (!r.ok) { setStatus((await r.json()).detail || "Save failed"); return; }
+  st.dirty = false; hist.saved = snap(); $("#revert").hidden = false; setStatus("Saved: prop.glb has Grip_Primary" + (st.hands === 2 ? " and Grip_Secondary" : "") + ", grip.json has the rest.");
+  showDownloads(jobId);
+};
+addEventListener("beforeunload", e => { if (st.dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+function themeColors() { grid.material.color = new THREE.Color(css("--line") || "#dedad2"); }
+addEventListener("themechange", themeColors); themeColors();
+
+// automation / debugging hook (browser tests): state and a model-space -> screen projection
+window.propEditor = { st, view: (pos, target) => { follow = null; HV.camera.position.fromArray(pos); HV.controls.target.fromArray(target); }, socket: side => human.getObjectByName(side + "Hand_Socket").getWorldPosition(new THREE.Vector3()).toArray(), setHuman: id => { $("#human").value = id; return loadHuman(id); }, get box() { return propBox; }, get human() { return human; }, get held() { return held; }, get tc() { return tc; }, hvScreen(v) {
+  const r = HV.renderer.domElement.getBoundingClientRect(); const p = new THREE.Vector3().fromArray(v).project(HV.camera);
+  return [r.left + (p.x + 1) / 2 * r.width, r.top + (1 - p.y) / 2 * r.height]; }, toScreen(x, y, z) {
+  const r = PV.renderer.domElement.getBoundingClientRect(); const v = new THREE.Vector3(x, y, z).project(PV.camera);
+  return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; } };
+
+// ---------- loop ----------
+const clock = new THREE.Clock();
+(function frame() {
+  const dt = Math.min(0.05, clock.getDelta());
+  if (mixer) mixer.update(dt);
+  if (held) {
+    if (st.arms === "static") {
+      upgradeCarry();
+      if (st.carry && !st.wantReady) carryPose(human, held, st.carry, human.userData.height);
+      else { readyPose(human, held, st.hold); captureCarry(); st.wantReady = false; }
+    }
+    if (held.secondary) solveSupportHand(human, held);
+    const other = st.hand === "Right" ? "Left" : "Right";
+    setFingers(human, st.hand, st.fingers.primary);
+    if (st.hands === 2) setFingers(human, other, st.fingers.secondary);
+    if (st.gizmo === "carry" && !dragging) placeCarryProxy();
+  }
+  followHand();
+  PV.controls.update(); HV.controls.update();
+  PV.renderer.render(PV.scene, PV.camera); HV.renderer.render(HV.scene, HV.camera);
+  requestAnimationFrame(frame);
+})();
+
+// ---------- start: the prop list and the humans to preview with ----------
+(async () => {
+  const objs = (await (await fetch("/api/3d?kind=object")).json()).filter(j => j.status === "done" && j.outputs?.game);
+  const humans = (await (await fetch("/api/3d?kind=human")).json()).filter(j => j.status === "done" && j.outputs?.rigged);
+  for (const j of objs) $("#pickprop").append(new Option((j.grip ? "✋ " : "") + (j.title || j.config?.describe || j.id).slice(0, 60), j.id));
+  for (const j of humans) $("#human").append(new Option((j.title || j.config?.describe || j.id).slice(0, 60), j.id));
+  if (!objs.length) { setStatus("No 3D objects yet: build one in 3D Objects or import a GLB in the Explorer."); return; }
+  if (!jobId || !objs.some(j => j.id === jobId)) jobId = objs[0].id;
+  $("#pickprop").value = jobId;
+  await loadProp(jobId);
+  if (humans.length) await loadHuman(humans[0].id); else $("#hhint").textContent = "No rigged humans yet: build one in 3D Humans to preview the hold.";
+})().catch(e => setStatus("Couldn't load: " + e.message));
+</script>
+</body>
+</html>
